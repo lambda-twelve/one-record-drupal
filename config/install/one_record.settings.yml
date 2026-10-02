@@ -1,0 +1,28 @@
+base_url: ''
+base_path: /one-record
+data_holder: ''
+data_holder_type: 'https://onerecord.iata.org/ns/cargo#Company'
+api_versions: []
+data_model_versions: []
+languages:
+  - en-US
+max_body_bytes: 1048576
+embedded_depth: 3
+bulk_logistics_events: false
+denial: forbid
+internal_agents: []
+authentication:
+  audience: ''
+  leeway_seconds: 30
+  issuers: []
+token_endpoint:
+  enabled: false
+  path: /one-record/oauth/token
+  issuer: ''
+  ttl_seconds: 3600
+  audience: ''
+  key_id: ''
+partners: []
+delivery:
+  lease_seconds: 300
+  max_attempts: 10

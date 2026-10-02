@@ -4,4 +4,5 @@
 /drush/
 /composer.lock
 /.editorconfig
-/.gitattributes
+/.gitattributes# Drupal core scaffolds this directory.
+/recipes/

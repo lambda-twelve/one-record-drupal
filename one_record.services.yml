@@ -1,0 +1,123 @@
+services:
+  logger.channel.one_record:
+    parent: logger.channel_base
+    arguments: ['one_record']
+
+  cache.one_record:
+    class: Drupal\Core\Cache\CacheBackendInterface
+    tags:
+      - { name: cache.bin }
+    factory: ['@cache_factory', 'get']
+    arguments: [one_record]
+
+  # Configuration, translated into the SDK's value objects.
+  one_record.config:
+    class: Drupal\one_record\Config\OneRecordConfig
+    arguments: ['@config.factory']
+  one_record.server_config:
+    class: LambdaTwelve\OneRecord\Server\ServerConfig
+    factory: ['@one_record.config', 'serverConfig']
+
+  # PSR bindings the SDK consumes.
+  one_record.clock:
+    class: Drupal\one_record\Clock\TimeClock
+    arguments: ['@datetime.time']
+  one_record.psr17_factory:
+    class: GuzzleHttp\Psr7\HttpFactory
+  one_record.simple_cache:
+    class: Drupal\one_record\Cache\SimpleCache
+    arguments: ['@cache.one_record', '@one_record.clock']
+
+  # Storage: the SDK's SPI on Drupal's database. Replace any of these to
+  # store a part elsewhere; the aliases are what the rest of the module uses.
+  one_record.store.logistics_objects:
+    class: Drupal\one_record\Store\DatabaseLogisticsObjectStore
+    arguments: ['@database']
+  one_record.store.logistics_events:
+    class: Drupal\one_record\Store\DatabaseLogisticsEventStore
+    arguments: ['@database']
+  one_record.store.action_requests:
+    class: Drupal\one_record\Store\DatabaseActionRequestStore
+    arguments: ['@database', '@one_record.clock']
+  one_record.store.subscriptions:
+    class: Drupal\one_record\Store\DatabaseSubscriptionStore
+    arguments: ['@database', '@one_record.clock']
+  one_record.store.delegations:
+    class: Drupal\one_record\Store\DatabaseAccessDelegationStore
+    arguments: ['@database', '@one_record.clock']
+  one_record.store.outbox:
+    class: Drupal\one_record\Store\DatabaseNotificationOutbox
+    arguments: ['@database']
+  one_record.outbox:
+    class: Drupal\one_record\Notification\QueuedOutbox
+    arguments: ['@one_record.store.outbox', '@database', '@queue']
+  LambdaTwelve\OneRecord\Server\Spi\LogisticsObjectStore: '@one_record.store.logistics_objects'
+  LambdaTwelve\OneRecord\Server\Spi\LogisticsEventStore: '@one_record.store.logistics_events'
+  LambdaTwelve\OneRecord\Server\Spi\ActionRequestStore: '@one_record.store.action_requests'
+  LambdaTwelve\OneRecord\Server\Spi\SubscriptionStore: '@one_record.store.subscriptions'
+  LambdaTwelve\OneRecord\Server\Spi\AccessDelegationStore: '@one_record.store.delegations'
+  LambdaTwelve\OneRecord\Server\Spi\NotificationOutbox: '@one_record.outbox'
+
+  # Authentication and authorisation.
+  one_record.signer_factory:
+    class: Drupal\one_record\Auth\SignerFactory
+    arguments: ['@one_record.config', '@settings', '@one_record.clock']
+  one_record.client_credentials:
+    class: Drupal\one_record\Auth\DatabaseClientCredentials
+    arguments: ['@database', '@password', '@one_record.clock']
+  one_record.authenticator_factory:
+    class: Drupal\one_record\Auth\AuthenticatorFactory
+    arguments: ['@one_record.config', '@one_record.clock', '@http_client', '@one_record.psr17_factory', '@one_record.simple_cache', '@logger.channel.one_record', '@one_record.signer_factory']
+  one_record.authenticator:
+    class: LambdaTwelve\OneRecord\Server\Spi\Authenticator
+    factory: ['@one_record.authenticator_factory', 'create']
+  one_record.access_policy_factory:
+    class: Drupal\one_record\Access\AccessPolicyFactory
+    arguments: ['@one_record.config', '@one_record.store.delegations', '@one_record.clock']
+  one_record.access_policy:
+    class: LambdaTwelve\OneRecord\Server\InMemory\InMemoryAccessPolicy
+    factory: ['@one_record.access_policy_factory', 'create']
+  LambdaTwelve\OneRecord\Server\Spi\Authenticator: '@one_record.authenticator'
+  LambdaTwelve\OneRecord\Server\Spi\AccessPolicy: '@one_record.access_policy'
+  LambdaTwelve\OneRecord\Auth\ClientCredentialsVerifier: '@one_record.client_credentials'
+
+  # The server.
+  one_record.services_factory:
+    class: Drupal\one_record\Server\ServicesFactory
+    arguments:
+      - '@one_record.config'
+      - '@one_record.store.logistics_objects'
+      - '@one_record.store.logistics_events'
+      - '@one_record.store.action_requests'
+      - '@one_record.store.subscriptions'
+      - '@one_record.store.delegations'
+      - '@one_record.outbox'
+      - '@one_record.authenticator'
+      - '@one_record.access_policy'
+      - '@one_record.clock'
+      - '@event_dispatcher'
+      - '@one_record.psr17_factory'
+      - '@one_record.psr17_factory'
+      - '@logger.channel.one_record'
+  one_record.services:
+    class: LambdaTwelve\OneRecord\Server\Services
+    factory: ['@one_record.services_factory', 'create']
+  one_record.server:
+    class: LambdaTwelve\OneRecord\Server\OneRecordServer
+    factory: ['LambdaTwelve\OneRecord\Server\ServerBuilder', 'build']
+    arguments: ['@one_record.services']
+  one_record.handler_factory:
+    class: Drupal\one_record\Server\HandlerFactory
+    arguments: ['@one_record.config', '@one_record.services_factory', '@database', '@one_record.psr17_factory', '@one_record.psr17_factory']
+  one_record.handler:
+    class: Psr\Http\Server\RequestHandlerInterface
+    factory: ['@one_record.handler_factory', 'create']
+  one_record.data_holder:
+    class: LambdaTwelve\OneRecord\Server\DataHolder
+    arguments: ['@one_record.services']
+
+  one_record.config_subscriber:
+    class: Drupal\one_record\EventSubscriber\ConfigSubscriber
+    arguments: ['@router.builder']
+    tags:
+      - { name: event_subscriber }

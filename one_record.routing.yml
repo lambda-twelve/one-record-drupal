@@ -1,0 +1,10 @@
+route_callbacks:
+  - '\Drupal\one_record\Routing\Routes::routes'
+
+one_record.settings:
+  path: '/admin/config/services/one-record'
+  defaults:
+    _form: '\Drupal\one_record\Form\SettingsForm'
+    _title: 'ONE Record'
+  requirements:
+    _permission: 'administer one record'

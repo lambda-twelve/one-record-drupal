@@ -6,4 +6,9 @@ parameters:
         - one_record.install
         - one_record.module
     treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        # Drupal's Form API passes untyped render arrays.
+        -
+            identifier: missingType.iterableValue
+            path: src/Form/*
     reportUnmatchedIgnoredErrors: true

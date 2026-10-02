@@ -1,0 +1,157 @@
+one_record.settings:
+  type: config_object
+  label: 'ONE Record settings'
+  mapping:
+    base_url:
+      type: string
+      label: 'Base URL'
+      constraints:
+        Regex:
+          pattern: '#^(https?://[^/\s]+)?$#'
+          message: 'The base URL is the scheme and host only, such as https://1r.example.com.'
+    base_path:
+      type: string
+      label: 'Base path'
+      constraints:
+        Regex:
+          pattern: '#^(/[^\s]*[^/\s])?$#'
+          message: 'The base path starts with a slash and does not end with one.'
+    data_holder:
+      type: uri
+      label: 'Data holder IRI'
+    data_holder_type:
+      type: string
+      label: 'Data holder type'
+    api_versions:
+      type: sequence
+      label: 'API versions offered (all when empty)'
+      sequence:
+        type: string
+        label: 'API version'
+    data_model_versions:
+      type: sequence
+      label: 'Data model versions listed (all when empty)'
+      sequence:
+        type: string
+        label: 'Data model version'
+    languages:
+      type: sequence
+      label: 'Content languages'
+      sequence:
+        type: string
+        label: 'Language tag'
+    max_body_bytes:
+      type: integer
+      label: 'Maximum request body size in bytes'
+      constraints:
+        Range:
+          min: 1024
+    embedded_depth:
+      type: integer
+      label: 'Depth of ?embedded=true'
+      constraints:
+        Range:
+          min: 0
+          max: 10
+    bulk_logistics_events:
+      type: boolean
+      label: 'Serve POST /logistics-events (API 2.3)'
+    denial:
+      type: string
+      label: 'How to answer a denied request'
+      constraints:
+        Choice:
+          - forbid
+          - hide
+    internal_agents:
+      type: sequence
+      label: 'Agents with full access'
+      sequence:
+        type: uri
+        label: 'Agent IRI'
+    authentication:
+      type: mapping
+      label: 'Bearer token verification'
+      mapping:
+        audience:
+          type: string
+          label: 'Expected audience (empty to skip the check)'
+        leeway_seconds:
+          type: integer
+          label: 'Clock leeway in seconds'
+        issuers:
+          type: sequence
+          label: 'Trusted token issuers'
+          sequence:
+            type: mapping
+            label: 'Issuer'
+            mapping:
+              issuer:
+                type: string
+                label: 'Issuer (the iss claim)'
+              jwks_url:
+                type: string
+                label: 'JWKS URL (empty for {issuer}/.well-known/jwks.json)'
+              public_keys:
+                type: sequence
+                label: 'Static public keys (PEM); used instead of JWKS when given'
+                sequence:
+                  type: string
+                  label: 'PEM'
+    token_endpoint:
+      type: mapping
+      label: 'OAuth 2.0 client-credentials token endpoint'
+      mapping:
+        enabled:
+          type: boolean
+          label: 'Serve the token endpoint'
+        path:
+          type: string
+          label: 'Path of the token endpoint'
+        issuer:
+          type: string
+          label: 'Issuer of the tokens (empty for the server endpoint URL)'
+        ttl_seconds:
+          type: integer
+          label: 'Token lifetime in seconds'
+        audience:
+          type: string
+          label: 'Audience claim written into tokens (empty for none)'
+        key_id:
+          type: string
+          label: 'Key id (kid) of the signing key'
+    partners:
+      type: sequence
+      label: 'Partners this host sends notifications to'
+      sequence:
+        type: mapping
+        label: 'Partner'
+        mapping:
+          agent:
+            type: uri
+            label: 'Agent IRI of the partner'
+          endpoint:
+            type: string
+            label: 'Server endpoint (empty to derive it from the agent IRI)'
+          token_url:
+            type: string
+            label: 'Token URL'
+          client_id:
+            type: string
+            label: 'Client id; the secret lives in settings.php'
+          scope:
+            type: string
+            label: 'OAuth scope (optional)'
+          basic_auth:
+            type: boolean
+            label: 'Send credentials as HTTP Basic instead of form fields'
+    delivery:
+      type: mapping
+      label: 'Notification delivery'
+      mapping:
+        lease_seconds:
+          type: integer
+          label: 'How long one delivery attempt may take'
+        max_attempts:
+          type: integer
+          label: 'Attempts before a notification is given up'

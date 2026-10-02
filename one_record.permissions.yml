@@ -1,0 +1,4 @@
+administer one record:
+  title: 'Administer ONE Record'
+  description: 'Configure the ONE Record server, its trusted issuers and partners.'
+  restrict access: true

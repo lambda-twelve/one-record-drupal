@@ -1,0 +1,5 @@
+one_record.settings:
+  title: 'ONE Record'
+  description: 'Configure the IATA ONE Record server.'
+  parent: system.admin_config_services
+  route_name: one_record.settings
