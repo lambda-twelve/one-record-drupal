@@ -14,7 +14,7 @@ use LambdaTwelve\OneRecord\Change\ChangeBuilder;
 use LambdaTwelve\OneRecord\Rdf\Iri;
 use LambdaTwelve\OneRecord\Server\DataHolder;
 use LambdaTwelve\OneRecord\Server\Event\LogisticsObjectCreated;
-use LambdaTwelve\OneRecord\Server\InMemory\InMemoryAccessPolicy;
+use LambdaTwelve\OneRecord\Server\GrantAccessPolicy;
 use LambdaTwelve\OneRecord\Vocabulary\Generated\Cargo;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -79,7 +79,7 @@ final class ServerRequestTest extends OneRecordKernelTestBase {
     self::assertSame(403, $this->request('GET', $path)->getStatusCode());
 
     $policy = $this->container->get('one_record.access_policy');
-    self::assertInstanceOf(InMemoryAccessPolicy::class, $policy);
+    self::assertInstanceOf(GrantAccessPolicy::class, $policy);
     $policy->allow(new Iri(self::PARTNER), $iri, [Permission::GetLogisticsObject]);
 
     $response = $this->request('GET', $path);
@@ -115,7 +115,7 @@ final class ServerRequestTest extends OneRecordKernelTestBase {
 
     $holder->subscribe(new Subscription(new Iri(self::PARTNER), TopicType::Identifier, $piece->iri->value, [SubscriptionEventType::LogisticsObjectUpdated]));
     $policy = $this->container->get('one_record.access_policy');
-    self::assertInstanceOf(InMemoryAccessPolicy::class, $policy);
+    self::assertInstanceOf(GrantAccessPolicy::class, $policy);
     $policy->allow(new Iri(self::PARTNER), $piece->iri, [Permission::GetLogisticsObject, Permission::PatchLogisticsObject]);
 
     // Diff against the stored revision: it carries the embedded node ids.

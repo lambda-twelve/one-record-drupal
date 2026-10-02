@@ -14,6 +14,7 @@ use LambdaTwelve\OneRecord\JsonLd\Json;
 use LambdaTwelve\OneRecord\Rdf\Iri;
 use LambdaTwelve\OneRecord\Server\Spi\ActionRequestStore;
 use LambdaTwelve\OneRecord\Server\Spi\AuditTrailQuery;
+use LambdaTwelve\OneRecord\Server\Spi\StoreException;
 use LambdaTwelve\OneRecord\Spec\ApiVersion;
 use Psr\Clock\ClockInterface;
 
@@ -100,6 +101,47 @@ final class DatabaseActionRequestStore implements ActionRequestStore {
    */
   public function auditTrail(Iri $logisticsObject, AuditTrailQuery $query): array {
     return $this->about($logisticsObject, [ActionRequestType::Change->name, ActionRequestType::Verification->name], $query);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function accepted(ActionRequestType $type): array {
+    $rows = $this->connection->select(self::TABLE, 'r')
+      ->fields('r', ['document'])
+      ->condition('type', $type->name)
+      ->condition('status', RequestStatus::Accepted->shortName())
+      ->orderBy('requested_at')
+      ->execute();
+    $out = [];
+    foreach ($rows ?? [] as $row) {
+      $out[] = ActionRequest::fromJsonLd((string) $row->document);
+    }
+    return $out;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function transition(ActionRequest $request, RequestStatus $expectedCurrent): void {
+    $payload = $request->payload;
+    // Compare-and-set on the stored status: a stale snapshot must not overwrite a newer decision.
+    $updated = $this->connection->update(self::TABLE)
+      ->fields([
+        'status' => $request->status->shortName(),
+        'status_since' => Db::microsOrNull($request->statusSince),
+        'last_modified' => Db::micros($request->lastModified()),
+        'expires_at' => $payload instanceof Subscription || $payload instanceof AccessDelegation ? Db::microsOrNull($payload->expiresAt) : NULL,
+        'api_version' => ApiVersion::latest()->value,
+        'document' => Json::encode($request->toJsonLd(ApiVersion::latest()), FALSE),
+      ])
+      ->condition('iri_hash', Db::hash($request->iri))
+      ->condition('status', $expectedCurrent->shortName())
+      ->execute();
+    if ($updated === 0) {
+      $current = $this->get($request->iri) ?? throw StoreException::notFound($request->iri);
+      throw StoreException::statusConflict($request->iri, $expectedCurrent->shortName(), $current->status->shortName());
+    }
   }
 
   /**

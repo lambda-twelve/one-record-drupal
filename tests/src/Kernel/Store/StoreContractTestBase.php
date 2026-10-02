@@ -529,10 +529,10 @@ abstract class StoreContractTestBase extends KernelTestBase {
   public function testOutboxRoundTrip(): void {
     $piece = $this->piece();
     $notification = new Notification(NotificationEventType::LogisticsObjectUpdated, $piece->iri, Cargo::Piece, new Iri(self::HOLDER), [Cargo::grossWeight], body: $piece);
-    $outbound = new OutboundNotification(new Iri(self::PARTNER), $notification, $this->clock->now());
+    $outbound = new OutboundNotification(new Iri(self::PARTNER), $notification, $this->clock->now(), 'n-1');
     self::assertSame('https://1r.partner.example/notifications', $outbound->suggestedEndpoint());
     $this->stores->outbox->enqueue($outbound);
-    $this->stores->outbox->enqueue(new OutboundNotification(new Iri('urn:agent:no-endpoint'), new Notification(NotificationEventType::LogisticsObjectCreated, $piece->iri), $this->clock->now()));
+    $this->stores->outbox->enqueue(new OutboundNotification(new Iri('urn:agent:no-endpoint'), new Notification(NotificationEventType::LogisticsObjectCreated, $piece->iri), $this->clock->now(), 'n-2'));
 
     $queued = $this->outboxContents();
     self::assertCount(2, $queued);

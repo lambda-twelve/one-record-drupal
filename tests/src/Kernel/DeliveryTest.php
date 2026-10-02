@@ -171,7 +171,7 @@ final class DeliveryTest extends OneRecordKernelTestBase {
     $outbox = $this->container->get('one_record.outbox');
     self::assertInstanceOf(QueuedOutbox::class, $outbox);
     $notification = new Notification(NotificationEventType::LogisticsObjectUpdated, $this->piece()->iri, Cargo::Piece, new Iri(self::HOLDER), [Cargo::grossWeight]);
-    $outbox->enqueue(new OutboundNotification(new Iri($recipient), $notification, $this->clock->now()));
+    $outbox->enqueue(new OutboundNotification(new Iri($recipient), $notification, $this->clock->now(), 'n-' . bin2hex(random_bytes(4))));
     $due = $this->outbox()->due($this->clock->now());
     return end($due) ?: throw new \LogicException('Nothing enqueued');
   }

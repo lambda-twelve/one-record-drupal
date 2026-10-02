@@ -93,8 +93,7 @@ final class DatabaseSubscriptionStore implements SubscriptionStore {
   /**
    * Registers a subscription this host wants when a publisher asks.
    *
-   * Not part of the SPI, which only reads offers; the in-memory store has the
-   * same method.
+   * {@inheritdoc}
    */
   public function offer(Subscription $subscription): void {
     $this->connection->insert(self::OFFERS)
@@ -109,12 +108,30 @@ final class DatabaseSubscriptionStore implements SubscriptionStore {
   }
 
   /**
+   * {@inheritdoc}
+   */
+  public function withdraw(Subscription $subscription): void {
+    $rows = $this->connection->select(self::OFFERS, 'o')
+      ->fields('o', ['id', 'document'])
+      ->condition('topic_type', $subscription->topicType->name)
+      ->condition('topic_hash', Db::hash($subscription->topic))
+      ->execute();
+    foreach ($rows ?? [] as $row) {
+      // Offers carry no subscriber column; match on the stored document's subscriber.
+      $offered = Subscription::fromJsonLd((string) $row->document);
+      if ($offered->subscriber->equals($subscription->subscriber)) {
+        $this->connection->delete(self::OFFERS)->condition('id', (int) $row->id)->execute();
+      }
+    }
+  }
+
+  /**
    * Withdraws every offer for a topic.
    *
    * @return int
    *   How many offers were removed.
    */
-  public function withdraw(TopicType $topicType, string $topic): int {
+  public function withdrawTopic(TopicType $topicType, string $topic): int {
     return $this->connection->delete(self::OFFERS)
       ->condition('topic_type', $topicType->name)
       ->condition('topic_hash', Db::hash($topic))
