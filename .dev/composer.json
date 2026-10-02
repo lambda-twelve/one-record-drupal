@@ -40,7 +40,7 @@
             "drupal/core-composer-scaffold": true,
             "php-http/discovery": true,
             "phpstan/extension-installer": true,
-            "symfony/runtime": false,
+            "symfony/runtime": true,
             "tbachert/spi": true
         }
     },

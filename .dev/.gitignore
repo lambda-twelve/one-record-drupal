@@ -6,3 +6,4 @@
 /.editorconfig
 /.gitattributes# Drupal core scaffolds this directory.
 /recipes/
+/scratch/

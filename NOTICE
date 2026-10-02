@@ -1,0 +1,9 @@
+ONE Record for Drupal
+Copyright Lambda Twelve
+
+Licensed under the Apache License, Version 2.0.
+
+This module integrates lambda-twelve/one-record, which implements the IATA ONE
+Record specification. The specification, ontologies and API documentation are
+published by IATA under the MIT licence; see the NOTICE of the SDK for details.
+Drupal is licensed under the GNU General Public License, version 2 or later.
