@@ -26,7 +26,7 @@ services:
     class: GuzzleHttp\Psr7\HttpFactory
   one_record.simple_cache:
     class: Drupal\one_record\Cache\SimpleCache
-    arguments: ['@cache.one_record', '@one_record.clock']
+    arguments: ['@cache.one_record', '@datetime.time']
 
   # Storage: the SDK's SPI on Drupal's database. Replace any of these to
   # store a part elsewhere; the aliases are what the rest of the module uses.
@@ -121,3 +121,19 @@ services:
     arguments: ['@router.builder']
     tags:
       - { name: event_subscriber }
+
+  # Delivering notifications to partners.
+  one_record.partner_registry:
+    class: Drupal\one_record\Notification\ConfigPartnerRegistry
+    arguments: ['@one_record.config', '@settings']
+  one_record.client_factory:
+    class: Drupal\one_record\Client\ClientFactory
+    arguments: ['@http_client', '@one_record.psr17_factory', '@one_record.psr17_factory', '@one_record.clock', '@one_record.simple_cache', '@logger.channel.one_record', '@one_record.partner_registry']
+  one_record.deliverer:
+    class: Drupal\one_record\Notification\ClientNotificationDeliverer
+    arguments: ['@one_record.client_factory']
+  one_record.delivery:
+    class: Drupal\one_record\Notification\Delivery
+    arguments: ['@one_record.store.outbox', '@one_record.deliverer', '@one_record.clock', '@one_record.config', '@logger.channel.one_record']
+  Drupal\one_record\Notification\PartnerRegistryInterface: '@one_record.partner_registry'
+  Drupal\one_record\Notification\NotificationDelivererInterface: '@one_record.deliverer'

@@ -11,4 +11,8 @@ parameters:
         -
             identifier: missingType.iterableValue
             path: src/Form/*
+        # Drush passes options and variadic arguments as plain arrays.
+        -
+            identifier: missingType.iterableValue
+            path: src/Drush/*
     reportUnmatchedIgnoredErrors: true

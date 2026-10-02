@@ -9,6 +9,8 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\one_record\Config\OneRecordConfig;
 use Drupal\Tests\one_record\Support\FixedClock;
 use Drupal\Tests\one_record\Support\HeaderAuthenticator;
+use Drupal\Tests\one_record\Support\MockHttp;
+use GuzzleHttp\Client;
 use LambdaTwelve\OneRecord\Model\Builder\ObjectBuilder;
 use LambdaTwelve\OneRecord\Model\Builder\Values;
 use LambdaTwelve\OneRecord\Model\LogisticsObject;
@@ -41,6 +43,16 @@ abstract class OneRecordKernelTestBase extends KernelTestBase {
   protected FixedClock $clock;
 
   /**
+   * Whether to trust the X-Test-Agent header instead of bearer tokens.
+   */
+  protected bool $headerAuthentication = TRUE;
+
+  /**
+   * Whether to script outgoing HTTP through MockHttp.
+   */
+  protected bool $mockHttp = FALSE;
+
+  /**
    * {@inheritdoc}
    */
   public function register(ContainerBuilder $container): void {
@@ -48,7 +60,12 @@ abstract class OneRecordKernelTestBase extends KernelTestBase {
     $this->clock = new FixedClock();
     $container->getDefinition('one_record.clock')->setClass(FixedClock::class)->setArguments([])->setSynthetic(TRUE);
     $container->set('one_record.clock', $this->clock);
-    $container->getDefinition('one_record.authenticator')->setClass(HeaderAuthenticator::class)->setFactory(NULL)->setArguments([]);
+    if ($this->headerAuthentication) {
+      $container->getDefinition('one_record.authenticator')->setClass(HeaderAuthenticator::class)->setFactory(NULL)->setArguments([]);
+    }
+    if ($this->mockHttp) {
+      $container->register('http_client', Client::class)->setFactory([MockHttp::class, 'client']);
+    }
   }
 
   /**

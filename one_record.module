@@ -6,3 +6,21 @@
  */
 
 declare(strict_types=1);
+
+use Drupal\one_record\Notification\QueuedOutbox;
+
+/**
+ * Implements hook_cron().
+ *
+ * Queues every outbox notification whose next attempt is due. Fresh rows
+ * are queued when they are written; this sweep picks up retries and any
+ * queue item that was lost.
+ */
+function one_record_cron(): void {
+  $outbox = \Drupal::service('one_record.store.outbox');
+  $clock = \Drupal::service('one_record.clock');
+  $queue = \Drupal::queue(QueuedOutbox::QUEUE);
+  foreach ($outbox->due($clock->now(), 200) as $id) {
+    $queue->createItem($id);
+  }
+}

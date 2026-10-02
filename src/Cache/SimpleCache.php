@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Drupal\one_record\Cache;
 
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Cache\CacheBackendInterface;
-use Psr\Clock\ClockInterface;
 use Psr\SimpleCache\CacheInterface;
 
 /**
@@ -13,12 +13,14 @@ use Psr\SimpleCache\CacheInterface;
  *
  * The SDK caches JWKS documents, partner tokens and server information
  * through PSR-16; this adapter puts them in the one_record cache bin.
+ * Expiry is computed from Drupal's time service, the clock the cache
+ * backends themselves live by, not from the SDK's clock.
  */
 final class SimpleCache implements CacheInterface {
 
   public function __construct(
     private readonly CacheBackendInterface $backend,
-    private readonly ClockInterface $clock,
+    private readonly TimeInterface $time,
   ) {}
 
   /**
@@ -113,7 +115,7 @@ final class SimpleCache implements CacheInterface {
     if ($ttl === NULL) {
       return CacheBackendInterface::CACHE_PERMANENT;
     }
-    $now = $this->clock->now();
+    $now = (new \DateTimeImmutable())->setTimestamp($this->time->getCurrentTime());
     $expires = $ttl instanceof \DateInterval ? $now->add($ttl) : $now->modify(sprintf('%+d seconds', $ttl));
     return $expires->getTimestamp();
   }
