@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+## Description: Install the development site: Composer dependencies, a minimal Drupal, the one_record module
+## Usage: install
+## Example: "ddev install"
+set -euo pipefail
+cd /var/www/html/.dev
+composer install --no-interaction
+bash link-module.sh
+mkdir -p web/sites/simpletest/browser_output
+chmod -R u+w web/sites/default
+vendor/bin/drush site:install minimal --yes --account-pass=admin --site-name="ONE Record dev" --db-url="mysql://db:db@db/db"
+vendor/bin/drush pm:install one_record --yes
+vendor/bin/drush cache:rebuild
+echo "Installed. Admin login: ddev drush uli"

@@ -1,0 +1,15 @@
+# Discovery notes and other local reference material.
+/ref/
+# Development site (see .dev/.gitignore) and tooling caches.
+/.phpunit.cache/
+/.phpcs.cache
+/.cache/
+/.dev/web/
+/.dev/vendor/
+/.dev/drush/
+/.dev/composer.lock
+coverage.xml
+coverage.json
+# Local assistant/tooling files: never part of the repository.
+/CLAUDE.md
+/.claude/

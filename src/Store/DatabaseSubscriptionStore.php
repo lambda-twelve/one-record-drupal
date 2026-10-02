@@ -1,0 +1,124 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Drupal\one_record\Store;
+
+use Drupal\Core\Database\Connection;
+use LambdaTwelve\OneRecord\Api\ActionRequest;
+use LambdaTwelve\OneRecord\Api\ActionRequestType;
+use LambdaTwelve\OneRecord\Api\RequestStatus;
+use LambdaTwelve\OneRecord\Api\Subscription;
+use LambdaTwelve\OneRecord\Api\TopicType;
+use LambdaTwelve\OneRecord\JsonLd\Json;
+use LambdaTwelve\OneRecord\Rdf\Iri;
+use LambdaTwelve\OneRecord\Server\Spi\SubscriptionStore;
+use Psr\Clock\ClockInterface;
+
+/**
+ * Subscriptions in Drupal's database.
+ *
+ * Who to notify is derived from the accepted subscription requests in the
+ * action-request table, through the topic columns that table projects. The
+ * subscriptions this host offers to publishers live in their own table.
+ */
+final class DatabaseSubscriptionStore implements SubscriptionStore {
+
+  private const REQUESTS = 'one_record_action_requests';
+  private const OFFERS = 'one_record_subscription_offers';
+
+  public function __construct(
+    private readonly Connection $connection,
+    private readonly ClockInterface $clock,
+  ) {}
+
+  /**
+   * {@inheritdoc}
+   */
+  public function subscribersOf(Iri $logisticsObject, array $types, \DateTimeImmutable $now): array {
+    $select = $this->connection->select(self::REQUESTS, 'r')
+      ->fields('r', ['document'])
+      ->condition('r.type', ActionRequestType::Subscription->name)
+      ->condition('r.status', RequestStatus::Accepted->shortName())
+      ->orderBy('r.created_at')
+      ->orderBy('r.iri_hash');
+    $select->condition($select->orConditionGroup()
+      ->isNull('r.expires_at')
+      ->condition('r.expires_at', Db::micros($now), '>'));
+    $topics = $select->orConditionGroup()
+      ->condition($select->andConditionGroup()
+        ->condition('r.topic_type', TopicType::Identifier->name)
+        ->condition('r.topic_hash', Db::hash($logisticsObject)));
+    if ($types !== []) {
+      $topics->condition($select->andConditionGroup()
+        ->condition('r.topic_type', TopicType::Type->name)
+        ->condition('r.topic_hash', array_map(Db::hash(...), $types), 'IN'));
+    }
+    $select->condition($topics);
+
+    $out = [];
+    foreach ($select->execute()?->fetchCol() ?? [] as $document) {
+      $request = ActionRequest::fromJsonLd((string) $document);
+      $subscription = $request->payload;
+      // The SQL narrows the candidates; the SDK's own rules decide.
+      if (!$subscription instanceof Subscription || $subscription->isExpiredAt($now) || !$subscription->covers($logisticsObject, $types)) {
+        continue;
+      }
+      $out[] = ['subscription' => $subscription, 'request' => $request->iri];
+    }
+    return $out;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function offered(TopicType $topicType, string $topic): array {
+    $documents = $this->connection->select(self::OFFERS, 'o')
+      ->fields('o', ['document'])
+      ->condition('topic_type', $topicType->name)
+      ->condition('topic_hash', Db::hash($topic))
+      ->orderBy('id')
+      ->execute()
+      ?->fetchCol() ?? [];
+    $offers = [];
+    foreach ($documents as $document) {
+      $offer = Subscription::fromJsonLd((string) $document);
+      if ($offer->topic === $topic) {
+        $offers[] = $offer;
+      }
+    }
+    return $offers;
+  }
+
+  /**
+   * Registers a subscription this host wants when a publisher asks.
+   *
+   * Not part of the SPI, which only reads offers; the in-memory store has the
+   * same method.
+   */
+  public function offer(Subscription $subscription): void {
+    $this->connection->insert(self::OFFERS)
+      ->fields([
+        'topic_type' => $subscription->topicType->name,
+        'topic' => $subscription->topic,
+        'topic_hash' => Db::hash($subscription->topic),
+        'document' => Json::encode($subscription->toJsonLd(), FALSE),
+        'created_at' => Db::micros($this->clock->now()),
+      ])
+      ->execute();
+  }
+
+  /**
+   * Withdraws every offer for a topic.
+   *
+   * @return int
+   *   How many offers were removed.
+   */
+  public function withdraw(TopicType $topicType, string $topic): int {
+    return $this->connection->delete(self::OFFERS)
+      ->condition('topic_type', $topicType->name)
+      ->condition('topic_hash', Db::hash($topic))
+      ->execute();
+  }
+
+}

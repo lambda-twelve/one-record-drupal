@@ -1,0 +1,9 @@
+parameters:
+    level: 8
+    paths:
+        - src
+        - tests
+        - one_record.install
+        - one_record.module
+    treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: true

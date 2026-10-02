@@ -1,0 +1,8 @@
+<?php
+
+/**
+ * @file
+ * Hooks for the ONE Record module.
+ */
+
+declare(strict_types=1);

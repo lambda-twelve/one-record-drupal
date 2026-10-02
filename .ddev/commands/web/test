@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+## Description: Run the module's PHPUnit tests through Drupal core's test runner configuration
+## Usage: test [phpunit args]
+## Example: "ddev test" or "ddev test --filter Store"
+set -euo pipefail
+cd /var/www/html/.dev
+exec vendor/bin/phpunit -c web/core web/modules/contrib/one_record/tests "$@"

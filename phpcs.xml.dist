@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="one_record">
+  <description>Drupal coding standards for the one_record module.</description>
+  <arg name="extensions" value="php,module,install,inc,theme,yml"/>
+  <arg name="cache" value=".phpcs.cache"/>
+  <arg value="p"/>
+  <file>src</file>
+  <file>tests</file>
+  <file>one_record.install</file>
+  <file>one_record.module</file>
+  <rule ref="Drupal"/>
+  <rule ref="DrupalPractice"/>
+  <!-- Test fixtures read better on one line than split to the Drupal limits. -->
+  <rule ref="Drupal.Arrays.Array.LongLineDeclaration">
+    <exclude-pattern>tests/</exclude-pattern>
+  </rule>
+  <rule ref="Drupal.Files.LineLength.TooLong">
+    <exclude-pattern>tests/</exclude-pattern>
+  </rule>
+</ruleset>

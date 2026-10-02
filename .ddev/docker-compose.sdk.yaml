@@ -1,0 +1,6 @@
+# The SDK working tree beside this repository, mounted where the dev project's
+# Composer path repository (../../one-record, relative to dev/) finds it.
+services:
+  web:
+    volumes:
+      - ../../one-record:/var/www/one-record:rw

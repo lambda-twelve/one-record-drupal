@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  composer:
+    name: Composer metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          coverage: none
+      - run: composer validate --strict --no-check-publish
+
+  tests:
+    name: Tests (Drupal ${{ matrix.drupal }}, PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - drupal: "^10.3"
+            php: "8.3"
+          - drupal: "^11.2"
+            php: "8.3"
+          - drupal: "^11.2"
+            php: "8.4"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: one-record-drupal
+      # The SDK is not on Packagist yet: the dev project reads it from the sibling directory.
+      - uses: actions/checkout@v4
+        with:
+          repository: lambda-twelve/one-record
+          path: one-record
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: json, openssl, pdo_sqlite, gd
+          coverage: none
+      - name: Pin the Drupal release line
+        working-directory: one-record-drupal/.dev
+        run: |
+          composer require --no-update \
+            "drupal/core-recommended:${{ matrix.drupal }}" \
+            "drupal/core-composer-scaffold:${{ matrix.drupal }}"
+          composer require --no-update --dev "drupal/core-dev:${{ matrix.drupal }}"
+      - uses: ramsey/composer-install@v3
+        with:
+          working-directory: one-record-drupal/.dev
+      - name: Link the module into the site
+        run: bash one-record-drupal/.dev/link-module.sh
+      - name: Run the module tests
+        working-directory: one-record-drupal/.dev
+        env:
+          SIMPLETEST_DB: "sqlite://localhost/sites/default/files/.ht.sqlite"
+          SIMPLETEST_BASE_URL: "http://127.0.0.1:8080"
+          BROWSERTEST_OUTPUT_DIRECTORY: "${{ github.workspace }}/one-record-drupal/.dev/web/sites/simpletest/browser_output"
+        run: |
+          mkdir -p web/sites/simpletest/browser_output web/sites/default/files
+          chmod -R a+w web/sites
+          (cd web && php -S 127.0.0.1:8080 .ht.router.php >/dev/null 2>&1 &)
+          vendor/bin/phpunit -c web/core web/modules/contrib/one_record/tests
+
+  static:
+    name: Static analysis and coding standards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: one-record-drupal
+      - uses: actions/checkout@v4
+        with:
+          repository: lambda-twelve/one-record
+          path: one-record
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: json, openssl, pdo_sqlite, gd
+          coverage: none
+      - uses: ramsey/composer-install@v3
+        with:
+          working-directory: one-record-drupal/.dev
+      - name: Link the module into the site
+        run: bash one-record-drupal/.dev/link-module.sh
+      - name: PHPStan
+        working-directory: one-record-drupal
+        run: .dev/vendor/bin/phpstan analyse --memory-limit=1G -c phpstan.neon.dist --no-progress
+      - name: Drupal coding standards
+        working-directory: one-record-drupal
+        run: .dev/vendor/bin/phpcs --standard=phpcs.xml.dist
+      - name: Dependency audit
+        working-directory: one-record-drupal/.dev
+        run: composer audit --no-dev

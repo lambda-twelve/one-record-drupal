@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+## Description: Re-link the module's top-level files into the development site (after adding new ones)
+## Usage: link-module
+## Example: "ddev link-module"
+set -euo pipefail
+exec bash /var/www/html/.dev/link-module.sh

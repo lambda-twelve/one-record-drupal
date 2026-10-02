@@ -1,0 +1,55 @@
+{
+    "name": "lambda-twelve/one-record-drupal",
+    "description": "Drupal integration for lambda-twelve/one-record: wires the IATA ONE Record SDK into Drupal's container, configuration, routing, database and queue.",
+    "type": "drupal-module",
+    "license": "Apache-2.0",
+    "keywords": [
+        "iata",
+        "one-record",
+        "air-cargo",
+        "json-ld",
+        "logistics",
+        "drupal"
+    ],
+    "homepage": "https://github.com/lambda-twelve/one-record-drupal",
+    "authors": [
+        {
+            "name": "Nick Andriopoulos",
+            "role": "Maintainer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/lambda-twelve/one-record-drupal/issues",
+        "source": "https://github.com/lambda-twelve/one-record-drupal"
+    },
+    "require": {
+        "php": ">=8.3",
+        "ext-json": "*",
+        "drupal/core": "^10.3 || ^11",
+        "lambda-twelve/one-record": "^1.0@beta",
+        "psr/clock": "^1.0",
+        "psr/event-dispatcher": "^1.0",
+        "psr/http-client": "^1.0",
+        "psr/http-factory": "^1.1",
+        "psr/http-message": "^1.1 || ^2.0",
+        "psr/http-server-handler": "^1.0",
+        "psr/log": "^2.0 || ^3.0",
+        "psr/simple-cache": "^2.0 || ^3.0"
+    },
+    "suggest": {
+        "drush/drush": "To use the one-record:* commands (^12.5 || ^13)"
+    },
+    "autoload": {
+        "psr-4": {
+            "Drupal\\one_record\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.0.x-dev"
+        }
+    }
+}

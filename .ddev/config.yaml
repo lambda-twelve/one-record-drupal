@@ -1,0 +1,20 @@
+name: one-record-drupal
+type: drupal11
+docroot: .dev/web
+php_version: "8.3"
+webserver_type: nginx-fpm
+xdebug_enabled: false
+additional_hostnames: []
+additional_fqdns: []
+database:
+    type: mariadb
+    version: "10.11"
+use_dns_when_possible: true
+composer_root: .dev
+composer_version: "2"
+# Drupal's test runner reads these; the DB and web host are DDEV's own containers.
+web_environment:
+    - SIMPLETEST_DB=mysql://db:db@db/db
+    - SIMPLETEST_BASE_URL=http://web
+    - BROWSERTEST_OUTPUT_DIRECTORY=/var/www/html/.dev/web/sites/simpletest/browser_output
+corepack_enable: false

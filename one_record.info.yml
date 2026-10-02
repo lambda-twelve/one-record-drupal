@@ -1,0 +1,7 @@
+name: ONE Record
+type: module
+description: 'Serves and consumes the IATA ONE Record API through the lambda-twelve/one-record SDK.'
+package: Web services
+core_version_requirement: ^10.3 || ^11
+php: 8.3
+configure: one_record.settings

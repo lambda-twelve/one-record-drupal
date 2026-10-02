@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+## Description: Run PHPStan (phpstan-drupal) over the module
+## Usage: phpstan [args]
+## Example: "ddev phpstan"
+set -euo pipefail
+cd /var/www/html
+exec .dev/vendor/bin/phpstan analyse --memory-limit=1G -c phpstan.neon.dist "$@"

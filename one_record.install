@@ -1,0 +1,316 @@
+<?php
+
+/**
+ * @file
+ * Install, update and schema hooks for the ONE Record module.
+ */
+
+declare(strict_types=1);
+
+/**
+ * Implements hook_schema().
+ *
+ * The SDK's storage SPI is persisted as the JSON-LD documents the SDK writes,
+ * plus the columns each query needs. IRIs that are looked up or joined on get
+ * a SHA-256 hash column so indexes stay short, byte-exact and independent of
+ * the collation. Timestamps are UTC microseconds since the epoch.
+ *
+ * @phpstan-return array<string, array<string, mixed>>
+ */
+function one_record_schema(): array {
+  $hash = [
+    'type' => 'varchar_ascii',
+    'length' => 64,
+    'not null' => TRUE,
+    'description' => 'Lowercase hex SHA-256 of the IRI.',
+  ];
+  $iri = [
+    'type' => 'text',
+    'not null' => TRUE,
+    'description' => 'The full IRI.',
+  ];
+  $time = [
+    'type' => 'int',
+    'size' => 'big',
+    'not null' => TRUE,
+    'description' => 'UTC microseconds since the Unix epoch.',
+  ];
+  $optional_time = ['not null' => FALSE] + $time;
+  $document = [
+    'type' => 'text',
+    'size' => 'big',
+    'not null' => TRUE,
+    'description' => 'The JSON-LD document as the SDK serialises it.',
+  ];
+
+  $schema['one_record_logistics_objects'] = [
+    'description' => 'One row per logistics object: its current revision and creation time.',
+    'fields' => [
+      'iri_hash' => $hash,
+      'iri' => $iri,
+      'latest_revision' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'created_at' => ['description' => 'When revision 1 was stored.'] + $time,
+      'updated_at' => ['description' => 'When the latest revision was stored.'] + $time,
+    ],
+    'primary key' => ['iri_hash'],
+  ];
+
+  $schema['one_record_logistics_object_revisions'] = [
+    'description' => 'Every revision of every logistics object.',
+    'fields' => [
+      'iri_hash' => $hash,
+      'revision' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'type' => [
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => FALSE,
+        'description' => 'The most specific cargo type, for inspection only.',
+      ],
+      'document' => $document,
+      'created_at' => $time,
+    ],
+    'primary key' => ['iri_hash', 'revision'],
+    'indexes' => [
+      'one_record_revision_time' => ['iri_hash', 'created_at'],
+    ],
+  ];
+
+  $schema['one_record_logistics_events'] = [
+    'description' => 'Logistics events, append-only, with the columns the event filters need.',
+    'fields' => [
+      'iri_hash' => $hash,
+      'iri' => $iri,
+      'logistics_object_hash' => $hash,
+      'logistics_object_iri' => $iri,
+      'event_code' => [
+        'type' => 'text',
+        'not null' => FALSE,
+      ],
+      'event_date' => $optional_time,
+      'creation_date' => $optional_time,
+      'created_at' => $time,
+      'document' => $document,
+    ],
+    'primary key' => ['iri_hash'],
+    'indexes' => [
+      'one_record_event_created' => ['logistics_object_hash', 'created_at'],
+      'one_record_event_occurred' => ['logistics_object_hash', 'event_date'],
+    ],
+  ];
+
+  $schema['one_record_action_requests'] = [
+    'description' => 'Action requests (change, subscription, access delegation, verification) and their status.',
+    'fields' => [
+      'iri_hash' => $hash,
+      'iri' => $iri,
+      'type' => [
+        'type' => 'varchar_ascii',
+        'length' => 32,
+        'not null' => TRUE,
+        'description' => 'ActionRequestType case name.',
+      ],
+      'status' => [
+        'type' => 'varchar_ascii',
+        'length' => 32,
+        'not null' => TRUE,
+        'description' => 'RequestStatus short name, e.g. REQUEST_PENDING.',
+      ],
+      'requested_by' => $iri,
+      'requested_by_hash' => $hash,
+      'requested_at' => $time,
+      'status_since' => $optional_time,
+      'last_modified' => ['description' => 'status_since, or requested_at while pending.'] + $time,
+      'topic_type' => [
+        'type' => 'varchar_ascii',
+        'length' => 32,
+        'not null' => FALSE,
+        'description' => 'Subscriptions only: TopicType case name.',
+      ],
+      'topic' => [
+        'type' => 'text',
+        'not null' => FALSE,
+      ],
+      'topic_hash' => ['not null' => FALSE] + $hash,
+      'subscriber_hash' => ['not null' => FALSE] + $hash,
+      'expires_at' => ['description' => 'Subscriptions and access delegations only.'] + $optional_time,
+      'api_version' => [
+        'type' => 'varchar_ascii',
+        'length' => 16,
+        'not null' => TRUE,
+        'description' => 'The API version the document was serialised at.',
+      ],
+      'document' => $document,
+      'created_at' => $time,
+      'updated_at' => $time,
+    ],
+    'primary key' => ['iri_hash'],
+    'indexes' => [
+      'one_record_request_type_status' => ['type', 'status'],
+      'one_record_request_topic' => ['topic_hash', 'type', 'status'],
+      'one_record_request_requester' => ['requested_by_hash'],
+    ],
+  ];
+
+  $schema['one_record_action_request_objects'] = [
+    'description' => 'The logistics objects each action request concerns.',
+    'fields' => [
+      'action_request_hash' => $hash,
+      'logistics_object_hash' => $hash,
+      'logistics_object_iri' => $iri,
+    ],
+    'primary key' => ['action_request_hash', 'logistics_object_hash'],
+    'indexes' => [
+      'one_record_request_object' => ['logistics_object_hash'],
+    ],
+  ];
+
+  $schema['one_record_subscription_offers'] = [
+    'description' => 'Subscriptions this host offers when a publisher asks GET /subscriptions.',
+    'fields' => [
+      'id' => [
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'topic_type' => [
+        'type' => 'varchar_ascii',
+        'length' => 32,
+        'not null' => TRUE,
+      ],
+      'topic' => [
+        'type' => 'text',
+        'not null' => TRUE,
+      ],
+      'topic_hash' => $hash,
+      'document' => $document,
+      'created_at' => $time,
+    ],
+    'primary key' => ['id'],
+    'indexes' => [
+      'one_record_offer_topic' => ['topic_type', 'topic_hash'],
+    ],
+  ];
+
+  $schema['one_record_grants'] = [
+    'description' => 'Permissions granted to agents on logistics objects.',
+    'fields' => [
+      'id' => [
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'agent' => $iri,
+      'agent_hash' => $hash,
+      'logistics_object_iri' => $iri,
+      'logistics_object_hash' => $hash,
+      'permissions' => [
+        'type' => 'text',
+        'not null' => TRUE,
+        'description' => 'Comma-separated permission short names, in order.',
+      ],
+      'expires_at' => $optional_time,
+      'source' => [
+        'type' => 'text',
+        'not null' => FALSE,
+        'description' => 'The access delegation request IRI, or NULL for the holder\'s own grant.',
+      ],
+      'source_hash' => ['not null' => FALSE] + $hash,
+      'created_at' => $time,
+    ],
+    'primary key' => ['id'],
+    'indexes' => [
+      'one_record_grant_agent_object' => ['agent_hash', 'logistics_object_hash'],
+      'one_record_grant_source' => ['source_hash'],
+      'one_record_grant_object' => ['logistics_object_hash'],
+    ],
+  ];
+
+  $schema['one_record_outbox'] = [
+    'description' => 'Notifications the server has queued for delivery to partners.',
+    'fields' => [
+      'id' => [
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'recipient' => $iri,
+      'recipient_hash' => $hash,
+      'endpoint' => [
+        'type' => 'text',
+        'not null' => FALSE,
+        'description' => 'The /notifications URL derived from the recipient at enqueue time.',
+      ],
+      'event_type' => [
+        'type' => 'varchar_ascii',
+        'length' => 128,
+        'not null' => TRUE,
+      ],
+      'logistics_object' => [
+        'type' => 'text',
+        'not null' => FALSE,
+      ],
+      'document' => $document,
+      'created_at' => $time,
+      'attempts' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'next_attempt_at' => ['description' => 'When the next attempt is due; doubles as a lease while an attempt runs.'] + $time,
+      'delivered_at' => $optional_time,
+      'failed_at' => ['description' => 'Set when delivery was given up.'] + $optional_time,
+      'last_error' => [
+        'type' => 'text',
+        'not null' => FALSE,
+      ],
+    ],
+    'primary key' => ['id'],
+    'indexes' => [
+      'one_record_outbox_due' => ['delivered_at', 'failed_at', 'next_attempt_at'],
+      'one_record_outbox_recipient' => ['recipient_hash'],
+    ],
+  ];
+
+  $schema['one_record_clients'] = [
+    'description' => 'OAuth 2.0 client credentials accepted by the token endpoint.',
+    'fields' => [
+      'client_id' => [
+        'type' => 'varchar_ascii',
+        'length' => 64,
+        'not null' => TRUE,
+      ],
+      'secret_hash' => [
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ],
+      'agent_iri' => $iri,
+      'label' => [
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'enabled' => [
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 1,
+      ],
+      'created_at' => $time,
+      'last_used_at' => $optional_time,
+    ],
+    'primary key' => ['client_id'],
+  ];
+
+  return $schema;
+}

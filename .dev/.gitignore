@@ -1,0 +1,7 @@
+# Everything Composer and Drupal generate for the development site.
+/web/
+/vendor/
+/drush/
+/composer.lock
+/.editorconfig
+/.gitattributes

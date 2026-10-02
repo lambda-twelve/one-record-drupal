@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+## Description: Check Drupal coding standards; pass "fix" to apply phpcbf
+## Usage: phpcs [fix] [args]
+## Example: "ddev phpcs" or "ddev phpcs fix"
+set -euo pipefail
+cd /var/www/html
+if [ "${1:-}" = "fix" ]; then
+  shift
+  exec .dev/vendor/bin/phpcbf --standard=phpcs.xml.dist "$@"
+fi
+exec .dev/vendor/bin/phpcs --standard=phpcs.xml.dist "$@"
