@@ -14,6 +14,7 @@ final class PendingNotification {
 
   public function __construct(
     public readonly int $id,
+    public readonly string $notificationId,
     public readonly Iri $recipient,
     public readonly ?string $endpoint,
     public readonly Notification $notification,

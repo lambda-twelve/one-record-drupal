@@ -536,6 +536,7 @@ abstract class StoreContractTestBase extends KernelTestBase {
 
     $queued = $this->outboxContents();
     self::assertCount(2, $queued);
+    self::assertSame(['n-1', 'n-2'], array_map(static fn(OutboundNotification $n): string => $n->id, $queued), 'the ids the SDK assigned survive storage');
     self::assertSame(self::PARTNER, $queued[0]->recipient->value);
     self::assertEquals($this->clock->now(), $queued[0]->createdAt);
     self::assertSame($notification->toJsonLd(), $queued[0]->notification->toJsonLd(), 'The body object survives');

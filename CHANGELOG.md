@@ -5,6 +5,12 @@ All notable changes to this module are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The outbox keeps the id the SDK gave each notification in its own unique
+  column and the deliverer sends it as the `Idempotency-Key`; before, the id
+  was dropped on storage and notifications went out without one.
+
 ### Added
 
 - Database implementations of every SDK storage SPI (logistics objects with

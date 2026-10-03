@@ -34,7 +34,8 @@ final class ClientNotificationDeliverer implements NotificationDelivererInterfac
       throw new DeliveryRejected($e->getMessage(), 0, $e);
     }
     try {
-      $client->sendNotification($notification->notification);
+      // The SDK's id travels as the Idempotency-Key, so a retried delivery is recognised (spec question 28).
+      $client->sendNotification($notification->notification, idempotencyKey: $notification->notificationId);
     }
     catch (OneRecordHttpException $e) {
       if ($e->status >= 500 || $e->status === 408 || $e->status === 429) {

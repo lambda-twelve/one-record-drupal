@@ -67,7 +67,7 @@ final class DatabaseStoresTest extends StoreContractTestBase {
     foreach ($this->outbox->due(new \DateTimeImmutable('2100-01-01'), 100) as $id) {
       $pending = $this->outbox->find($id);
       self::assertNotNull($pending);
-      $out[] = new OutboundNotification($pending->recipient, $pending->notification, $pending->createdAt, (string) $pending->id);
+      $out[] = new OutboundNotification($pending->recipient, $pending->notification, $pending->createdAt, $pending->notificationId);
     }
     return $out;
   }

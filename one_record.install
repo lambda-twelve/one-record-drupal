@@ -241,6 +241,12 @@ function one_record_schema(): array {
         'unsigned' => TRUE,
         'not null' => TRUE,
       ],
+      'notification_id' => [
+        'type' => 'varchar_ascii',
+        'length' => 191,
+        'not null' => TRUE,
+        'description' => 'The id the SDK gave the notification; sent as its Idempotency-Key.',
+      ],
       'recipient' => $iri,
       'recipient_hash' => $hash,
       'endpoint' => [
@@ -274,6 +280,9 @@ function one_record_schema(): array {
       ],
     ],
     'primary key' => ['id'],
+    'unique keys' => [
+      'one_record_outbox_notification' => ['notification_id'],
+    ],
     'indexes' => [
       'one_record_outbox_due' => ['delivered_at', 'failed_at', 'next_attempt_at'],
       'one_record_outbox_recipient' => ['recipient_hash'],

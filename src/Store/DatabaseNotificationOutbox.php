@@ -43,6 +43,7 @@ final class DatabaseNotificationOutbox implements NotificationOutbox {
     $created = Db::micros($notification->createdAt);
     $id = $this->connection->insert(self::TABLE)
       ->fields([
+        'notification_id' => $notification->id,
         'recipient' => $notification->recipient->value,
         'recipient_hash' => Db::hash($notification->recipient),
         'endpoint' => $notification->suggestedEndpoint(),
@@ -174,6 +175,7 @@ final class DatabaseNotificationOutbox implements NotificationOutbox {
   private function hydrate(array $row): PendingNotification {
     return new PendingNotification(
       (int) $row['id'],
+      (string) $row['notification_id'],
       new Iri((string) $row['recipient']),
       $row['endpoint'] === NULL ? NULL : (string) $row['endpoint'],
       Notification::fromJsonLd((string) $row['document']),
