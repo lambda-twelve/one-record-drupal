@@ -23,6 +23,37 @@ jobs:
           php-version: "8.3"
           coverage: none
       - run: composer validate --strict --no-check-publish
+      # The README's command, against a project with Composer's default
+      # stability: the wrapper's own SDK constraint is not enough there. The
+      # SDK is checked out at the release the constraint declares as its
+      # minimum, so the check proves that release, not the default branch.
+      - name: Read the minimum SDK release from composer.json
+        id: sdk
+        run: |
+          version=$(php -r '$c = json_decode(file_get_contents("composer.json"), true)["require"]["lambda-twelve/one-record"]; preg_match("/\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.]+)?/", $c, $m) || exit(1); echo $m[0];')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: lambda-twelve/one-record
+          ref: ${{ steps.sdk.outputs.version }}
+          path: one-record
+      - name: Resolve the documented installation in a clean consumer project
+        env:
+          sdk_version: ${{ steps.sdk.outputs.version }}
+        run: |
+          mkdir consumer && cd consumer
+          cat > composer.json <<EOF
+          {
+            "name": "example/site",
+            "repositories": [
+              {"type": "path", "url": "$GITHUB_WORKSPACE", "options": {"symlink": false}},
+              {"type": "path", "url": "$GITHUB_WORKSPACE/one-record", "options": {"symlink": false, "versions": {"lambda-twelve/one-record": "${sdk_version}"}}}
+            ],
+            "config": {"allow-plugins": false}
+          }
+          EOF
+          composer require --dry-run --no-plugins --no-interaction \
+            lambda-twelve/one-record-drupal:@dev "lambda-twelve/one-record:^${sdk_version}@beta"
 
   tests:
     name: Tests (Drupal ${{ matrix.drupal }}, PHP ${{ matrix.php }})
@@ -41,16 +72,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: one-record-drupal
-      # The SDK is not on Packagist yet: the dev project reads it from the sibling directory.
-      - uses: actions/checkout@v4
-        with:
-          repository: lambda-twelve/one-record
-          path: one-record
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
           extensions: json, openssl, pdo_sqlite, gd
           coverage: none
+      # The dev project reads the SDK from the sibling directory, checked out
+      # at the minimum release the module's constraint declares.
+      - name: Read the minimum SDK release from composer.json
+        id: sdk
+        working-directory: one-record-drupal
+        run: |
+          version=$(php -r '$c = json_decode(file_get_contents("composer.json"), true)["require"]["lambda-twelve/one-record"]; preg_match("/\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.]+)?/", $c, $m) || exit(1); echo $m[0];')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: lambda-twelve/one-record
+          ref: ${{ steps.sdk.outputs.version }}
+          path: one-record
       - name: Pin the Drupal release line
         working-directory: one-record-drupal/.dev
         run: |
@@ -82,15 +121,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: one-record-drupal
-      - uses: actions/checkout@v4
-        with:
-          repository: lambda-twelve/one-record
-          path: one-record
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
           extensions: json, openssl, pdo_sqlite, gd
           coverage: none
+      - name: Read the minimum SDK release from composer.json
+        id: sdk
+        working-directory: one-record-drupal
+        run: |
+          version=$(php -r '$c = json_decode(file_get_contents("composer.json"), true)["require"]["lambda-twelve/one-record"]; preg_match("/\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.]+)?/", $c, $m) || exit(1); echo $m[0];')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: lambda-twelve/one-record
+          ref: ${{ steps.sdk.outputs.version }}
+          path: one-record
       - uses: ramsey/composer-install@v3
         with:
           working-directory: one-record-drupal/.dev

@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\one_record\Kernel\Store;
 
-use Drupal\Tests\one_record\Support\FixedClock;
 use Drupal\Tests\one_record\Support\Stores;
 use LambdaTwelve\OneRecord\Server\InMemory\InMemoryState;
+use LambdaTwelve\OneRecord\Testing\FixedClock;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 

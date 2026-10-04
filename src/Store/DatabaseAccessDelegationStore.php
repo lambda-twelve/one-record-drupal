@@ -87,7 +87,7 @@ final class DatabaseAccessDelegationStore implements AccessDelegationStore {
   /**
    * Removes the holder's own grants to an agent on an object.
    *
-   * The counterpart of InMemoryAccessPolicy::allow(), which writes a grant
+   * The counterpart of GrantAccessPolicy::allow(), which writes a grant
    * without a source; delegated grants are revoked through their request.
    *
    * @return int

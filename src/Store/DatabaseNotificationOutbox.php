@@ -20,6 +20,12 @@ use LambdaTwelve\OneRecord\Server\Spi\OutboundNotification;
  * lease while an attempt runs, and the outcome of each attempt. Retries are
  * driven by the next_attempt_at column, so a lost queue item cannot lose a
  * notification.
+ *
+ * A claim is an attempt number, and every outcome names the attempt it
+ * belongs to: a worker whose lease ran out, and whose row another worker
+ * has since claimed, can no longer record anything over the newer attempt.
+ * Delivery is therefore at least once; the Idempotency-Key lets the partner
+ * drop the repeat.
  */
 final class DatabaseNotificationOutbox implements NotificationOutbox {
 
@@ -93,49 +99,112 @@ final class DatabaseNotificationOutbox implements NotificationOutbox {
   /**
    * Takes a lease on a due row so only one worker attempts it.
    *
+   * The attempt number of the returned row is the worker's claim: the
+   * outcome it records must carry it, and is ignored once a later attempt
+   * has claimed the row.
+   *
    * @return \Drupal\one_record\Notification\PendingNotification|null
    *   The row, or NULL when it is not due, already leased, or finished.
    */
   public function claim(int $id, \DateTimeImmutable $now, int $leaseSeconds = 300): ?PendingNotification {
+    $seen = $this->find($id);
+    return $seen === NULL ? NULL : $this->lease($seen, $now, $leaseSeconds);
+  }
+
+  /**
+   * Leases a row as it was read, or nothing if it has moved on since.
+   *
+   * The update is a compare-and-set on the attempt number the caller read,
+   * so the number it is given back is its own by construction: no second
+   * read that could observe a later worker's claim. A worker that paused
+   * between reading and leasing finds the row taken and gets NULL.
+   *
+   * @return \Drupal\one_record\Notification\PendingNotification|null
+   *   The leased row with its new attempt number, or NULL.
+   */
+  public function lease(PendingNotification $seen, \DateTimeImmutable $now, int $leaseSeconds = 300): ?PendingNotification {
+    $until = $now->modify(sprintf('+%d seconds', $leaseSeconds));
     $claimed = $this->connection->update(self::TABLE)
-      ->expression('attempts', 'attempts + 1')
-      ->fields(['next_attempt_at' => Db::micros($now->modify(sprintf('+%d seconds', $leaseSeconds)))])
-      ->condition('id', $id)
+      ->fields(['attempts' => $seen->attempts + 1, 'next_attempt_at' => Db::micros($until)])
+      ->condition('id', $seen->id)
+      ->condition('attempts', $seen->attempts)
       ->isNull('delivered_at')
       ->isNull('failed_at')
       ->condition('next_attempt_at', Db::micros($now), '<=')
       ->execute();
-    return $claimed === 1 ? $this->find($id) : NULL;
+    if ($claimed !== 1) {
+      return NULL;
+    }
+    return new PendingNotification(
+      $seen->id,
+      $seen->notificationId,
+      $seen->recipient,
+      $seen->endpoint,
+      $seen->notification,
+      $seen->createdAt,
+      $seen->attempts + 1,
+      $until,
+      NULL,
+      NULL,
+      $seen->lastError,
+    );
   }
 
   /**
    * Records that the partner confirmed the notification.
+   *
+   * @return bool
+   *   Whether the attempt still owned the row.
    */
-  public function markDelivered(int $id, \DateTimeImmutable $now): void {
-    $this->connection->update(self::TABLE)
-      ->fields(['delivered_at' => Db::micros($now), 'last_error' => NULL])
-      ->condition('id', $id)
-      ->execute();
+  public function markDelivered(int $id, int $attempt, \DateTimeImmutable $now): bool {
+    return $this->outcome($id, $attempt, ['delivered_at' => Db::micros($now), 'last_error' => NULL]);
   }
 
   /**
    * Records a failed attempt and when to try again.
+   *
+   * @return bool
+   *   Whether the attempt still owned the row.
    */
-  public function markRetry(int $id, \DateTimeImmutable $next, string $error): void {
-    $this->connection->update(self::TABLE)
-      ->fields(['next_attempt_at' => Db::micros($next), 'last_error' => mb_substr($error, 0, 2000)])
-      ->condition('id', $id)
-      ->execute();
+  public function markRetry(int $id, int $attempt, \DateTimeImmutable $next, string $error): bool {
+    return $this->outcome($id, $attempt, [
+      'next_attempt_at' => Db::micros($next),
+      'last_error' => mb_substr($error, 0, 2000),
+    ]);
   }
 
   /**
    * Gives up on a notification.
+   *
+   * @return bool
+   *   Whether the attempt still owned the row.
    */
-  public function markFailed(int $id, \DateTimeImmutable $now, string $error): void {
-    $this->connection->update(self::TABLE)
-      ->fields(['failed_at' => Db::micros($now), 'last_error' => mb_substr($error, 0, 2000)])
+  public function markFailed(int $id, int $attempt, \DateTimeImmutable $now, string $error): bool {
+    return $this->outcome($id, $attempt, ['failed_at' => Db::micros($now), 'last_error' => mb_substr($error, 0, 2000)]);
+  }
+
+  /**
+   * Writes an attempt's outcome, unless a later attempt owns the row by now.
+   *
+   * @param int $id
+   *   The row.
+   * @param int $attempt
+   *   The attempt number the worker was given when it claimed the row.
+   * @param array<string, mixed> $fields
+   *   The columns to set.
+   *
+   * @return bool
+   *   Whether the row was still this attempt's to update.
+   */
+  private function outcome(int $id, int $attempt, array $fields): bool {
+    $updated = $this->connection->update(self::TABLE)
+      ->fields($fields)
       ->condition('id', $id)
+      ->condition('attempts', $attempt)
+      ->isNull('delivered_at')
+      ->isNull('failed_at')
       ->execute();
+    return $updated === 1;
   }
 
   /**

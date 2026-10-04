@@ -43,8 +43,15 @@ final class InstallTest extends KernelTestBase {
     self::assertSame(503, $response->getStatusCode());
     self::assertStringContainsString('not configured', (string) $response->getBody());
 
-    $schema = $this->container->get('database')->schema();
     $this->container->get('module_handler')->loadInclude('one_record', 'install');
+    $requirement = \one_record_requirements('runtime')['one_record'];
+    self::assertSame(REQUIREMENT_WARNING, $requirement['severity'], 'The status report says so too');
+    self::assertStringContainsString('The base URL is not set.', (string) $requirement['description'], 'In the SDK\'s words');
+    self::assertStringContainsString('The data holder is not set', (string) $requirement['description']);
+    self::assertSame(['The base URL is not set.', 'The data holder is not set: the IRI of the organisation this server speaks for.'], $config->problems());
+    self::assertSame([], \one_record_requirements('install'));
+
+    $schema = $this->container->get('database')->schema();
     foreach (array_keys(\one_record_schema()) as $table) {
       self::assertFalse($schema->tableExists($table), 'Kernel tests install schema explicitly');
     }

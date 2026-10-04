@@ -5,21 +5,28 @@ declare(strict_types=1);
 namespace Drupal\one_record\Store;
 
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Database\IntegrityConstraintViolationException;
 use Drupal\Core\Database\Query\SelectInterface;
 use LambdaTwelve\OneRecord\JsonLd\Json;
-use LambdaTwelve\OneRecord\JsonLd\JsonLd;
 use LambdaTwelve\OneRecord\Model\LogisticsEvent;
 use LambdaTwelve\OneRecord\Rdf\Iri;
 use LambdaTwelve\OneRecord\Server\Spi\EventQuery;
 use LambdaTwelve\OneRecord\Server\Spi\LogisticsEventStore;
+use LambdaTwelve\OneRecord\Server\Spi\StoreException;
 
 /**
  * Logistics events in Drupal's database.
  *
  * The event date, creation date and event code are extracted into columns on
  * append so the spec's filters run in SQL. Sorting and paging happen in PHP
- * after the filtered rows are loaded: the SDK's ordering is byte-exact on the
- * IRI, which a collated ORDER BY cannot promise on every database.
+ * on those columns: the SDK's ordering is byte-exact on the IRI, which a
+ * collated ORDER BY cannot promise on every database. Only the page that is
+ * returned has its JSON-LD loaded and expanded, so a small page over a long
+ * history costs a scan of short rows, not a hydration of each.
+ *
+ * Every event the server hands over carries cargo:eventDate (the SDK refuses
+ * one without); the fallbacks to the receipt time below only keep the store
+ * total over rows written by other means.
  */
 final class DatabaseLogisticsEventStore implements LogisticsEventStore {
 
@@ -33,19 +40,35 @@ final class DatabaseLogisticsEventStore implements LogisticsEventStore {
    * {@inheritdoc}
    */
   public function append(LogisticsEvent $event): void {
-    $this->connection->merge(self::TABLE)
-      ->keys(['iri_hash' => Db::hash($event->iri)])
-      ->fields([
-        'iri' => $event->iri->value,
-        'logistics_object_hash' => Db::hash($event->logisticsObject),
-        'logistics_object_iri' => $event->logisticsObject->value,
-        'event_code' => $event->eventCode(),
-        'event_date' => Db::microsOrNull($event->eventDate()),
-        'creation_date' => Db::microsOrNull($event->creationDate()),
-        'created_at' => Db::micros($event->created),
-        'document' => Json::encode($event->toJsonLd(), FALSE),
-      ])
-      ->execute();
+    // A savepoint, so a refused insert leaves the surrounding transaction
+    // usable on every database.
+    $transaction = $this->connection->startTransaction();
+    try {
+      try {
+        $this->connection->insert(self::TABLE)
+          ->fields([
+            'iri_hash' => Db::hash($event->iri),
+            'iri' => $event->iri->value,
+            'logistics_object_hash' => Db::hash($event->logisticsObject),
+            'logistics_object_iri' => $event->logisticsObject->value,
+            'event_code' => $event->eventCode(),
+            'event_date' => Db::microsOrNull($event->eventDate()),
+            'creation_date' => Db::microsOrNull($event->creationDate()),
+            'created_at' => Db::micros($event->created),
+            'document' => Json::encode($event->toJsonLd(), FALSE),
+          ])
+          ->execute();
+      }
+      catch (IntegrityConstraintViolationException) {
+        // The log is append-only and an event IRI is unique on the server,
+        // whichever object it is filed under.
+        throw StoreException::alreadyExists($event->iri);
+      }
+    }
+    catch (\Throwable $e) {
+      $transaction->rollBack();
+      throw $e;
+    }
   }
 
   /**
@@ -53,7 +76,7 @@ final class DatabaseLogisticsEventStore implements LogisticsEventStore {
    */
   public function get(Iri $eventIri): ?LogisticsEvent {
     $row = $this->connection->select(self::TABLE, 'e')
-      ->fields('e')
+      ->fields('e', ['iri', 'logistics_object_iri', 'document', 'created_at'])
       ->condition('iri_hash', Db::hash($eventIri))
       ->execute()
       ?->fetchAssoc();
@@ -64,8 +87,18 @@ final class DatabaseLogisticsEventStore implements LogisticsEventStore {
    * {@inheritdoc}
    */
   public function query(Iri $logisticsObject, EventQuery $query): array {
+    if ($query->limit !== NULL && $query->limit <= 0) {
+      return [];
+    }
     $select = $this->connection->select(self::TABLE, 'e')
-      ->fields('e')
+      ->fields('e', [
+        'iri_hash',
+        'iri',
+        'event_code',
+        'event_date',
+        'creation_date',
+        'created_at',
+      ])
       ->condition('logistics_object_hash', Db::hash($logisticsObject));
     $this->applyRanges($select, $query);
     if ($query->eventCodes !== []) {
@@ -78,25 +111,53 @@ final class DatabaseLogisticsEventStore implements LogisticsEventStore {
       }
       $select->condition($codes);
     }
-    $events = [];
+
+    $byEvent = str_ends_with($query->sort, 'eventDate');
+    $descending = str_starts_with($query->sort, 'DESC');
+    $keys = [];
     foreach ($select->execute() ?? [] as $row) {
-      $event = $this->hydrate((array) $row);
-      if ($query->eventCodes !== [] && !$this->matchesAny($event, $query->eventCodes)) {
+      $row = (array) $row;
+      $code = $row['event_code'] === NULL ? NULL : (string) $row['event_code'];
+      if ($query->eventCodes !== [] && !self::matchesAny($code, $query->eventCodes)) {
         continue;
       }
-      $events[] = $event;
+      $instant = $byEvent ? ($row['event_date'] ?? $row['created_at']) : ($row['creation_date'] ?? $row['created_at']);
+      $keys[] = ['hash' => (string) $row['iri_hash'], 'iri' => (string) $row['iri'], 'at' => (int) $instant];
     }
-    usort($events, static function (LogisticsEvent $a, LogisticsEvent $b) use ($query): int {
-      $byEvent = str_ends_with($query->sort, 'eventDate');
-      $ka = $byEvent ? ($a->eventDate() ?? $a->created) : ($a->creationDate() ?? $a->created);
-      $kb = $byEvent ? ($b->eventDate() ?? $b->created) : ($b->creationDate() ?? $b->created);
-      $cmp = $ka <=> $kb;
+    usort($keys, static function (array $a, array $b) use ($descending): int {
+      $cmp = $a['at'] <=> $b['at'];
       if ($cmp === 0) {
-        $cmp = strcmp($a->iri->value, $b->iri->value);
+        $cmp = strcmp($a['iri'], $b['iri']);
       }
-      return str_starts_with($query->sort, 'DESC') ? -$cmp : $cmp;
+      return $descending ? -$cmp : $cmp;
     });
-    return array_slice($events, $query->skip, $query->limit);
+    $page = array_slice($keys, $query->skip, $query->limit);
+    if ($page === []) {
+      return [];
+    }
+
+    $rows = $this->connection->select(self::TABLE, 'e')
+      ->fields('e', [
+        'iri_hash',
+        'iri',
+        'logistics_object_iri',
+        'document',
+        'created_at',
+      ])
+      ->condition('iri_hash', array_column($page, 'hash'), 'IN')
+      ->execute();
+    $byHash = [];
+    foreach ($rows ?? [] as $row) {
+      $row = (array) $row;
+      $byHash[(string) $row['iri_hash']] = $row;
+    }
+    $events = [];
+    foreach ($page as $key) {
+      if (isset($byHash[$key['hash']])) {
+        $events[] = $this->hydrate($byHash[$key['hash']]);
+      }
+    }
+    return $events;
   }
 
   /**
@@ -111,9 +172,7 @@ final class DatabaseLogisticsEventStore implements LogisticsEventStore {
   }
 
   /**
-   * Removes every event of an object, for a host's data-erasure flow.
-   *
-   * Not part of the SPI: DataHolder::forget() erases the object only.
+   * {@inheritdoc}
    */
   public function eraseFor(Iri $logisticsObject): void {
     $this->connection->delete(self::TABLE)
@@ -140,16 +199,22 @@ final class DatabaseLogisticsEventStore implements LogisticsEventStore {
   }
 
   /**
-   * Whether an event carries any of the requested codes.
+   * Whether a stored event code matches any requested code.
    *
-   * @param \LambdaTwelve\OneRecord\Model\LogisticsEvent $event
-   *   The event.
-   * @param list<string> $codes
+   * The same rule as LogisticsEvent::matchesCode(), on the column the code
+   * was extracted into, so a code filter needs no document.
+   *
+   * @param string|null $code
+   *   The stored event code.
+   * @param list<string> $filters
    *   The requested codes.
    */
-  private function matchesAny(LogisticsEvent $event, array $codes): bool {
-    foreach ($codes as $code) {
-      if ($event->matchesCode($code)) {
+  private static function matchesAny(?string $code, array $filters): bool {
+    if ($code === NULL) {
+      return FALSE;
+    }
+    foreach ($filters as $filter) {
+      if ($code === $filter || str_ends_with($code, '#' . $filter) || str_ends_with($code, '/' . $filter)) {
         return TRUE;
       }
     }
@@ -163,10 +228,10 @@ final class DatabaseLogisticsEventStore implements LogisticsEventStore {
    *   The row.
    */
   private function hydrate(array $row): LogisticsEvent {
-    return new LogisticsEvent(
+    return LogisticsEvent::fromStored(
       new Iri((string) $row['iri']),
       new Iri((string) $row['logistics_object_iri']),
-      JsonLd::expand((string) $row['document'])->graph,
+      (string) $row['document'],
       Db::time($row['created_at']),
     );
   }

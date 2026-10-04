@@ -44,9 +44,9 @@ final class MockHttp {
   }
 
   /**
-   * Queues a response.
+   * Queues a response, or a transport failure to throw.
    */
-  public static function respond(ResponseInterface $response): void {
+  public static function respond(ResponseInterface|\Throwable $response): void {
     self::$handler ??= new MockHandler();
     self::$handler->append($response);
   }

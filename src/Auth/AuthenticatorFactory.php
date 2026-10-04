@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\one_record\Auth;
 
 use Drupal\one_record\Config\OneRecordConfig;
+use LambdaTwelve\OneRecord\Auth\Jwt\ChainKeyResolver;
 use LambdaTwelve\OneRecord\Auth\Jwt\JwksKeyResolver;
 use LambdaTwelve\OneRecord\Auth\Jwt\KeyResolver;
 use LambdaTwelve\OneRecord\Auth\Jwt\Rs256Verifier;
@@ -72,7 +73,7 @@ final class AuthenticatorFactory {
     return match (count($resolvers)) {
       0 => new StaticKeyResolver([]),
       1 => $resolvers[0],
-      default => new CompositeKeyResolver(...$resolvers),
+      default => new ChainKeyResolver(...$resolvers),
     };
   }
 

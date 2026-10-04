@@ -194,6 +194,24 @@ final class SettingsForm extends ConfigFormBase {
    */
   public function validateForm(array &$form, FormStateInterface $form_state): void {
     parent::validateForm($form, $form_state);
+    // The SDK says what is wrong with each setting, without constructing
+    // anything; each sentence lands on the field it is about.
+    $problems = ServerConfig::problems([
+      'baseUrl' => trim((string) $form_state->getValue('base_url')),
+      'dataHolder' => trim((string) $form_state->getValue('data_holder')),
+      'basePath' => rtrim(trim((string) $form_state->getValue('base_path')), '/'),
+      'apiVersions' => self::checked($form_state->getValue('api_versions')) ?: NULL,
+      'dataModelVersions' => self::checked($form_state->getValue('data_model_versions')) ?: NULL,
+      'languages' => self::languages($form_state->getValue('languages')),
+      'maxBodyBytes' => (int) $form_state->getValue('max_body_bytes'),
+      'embeddedDepth' => (int) $form_state->getValue('embedded_depth'),
+    ]);
+    foreach ($problems as $problem) {
+      $form_state->setErrorByName(self::fieldFor($problem), $problem);
+    }
+    if ($problems !== []) {
+      return;
+    }
     try {
       new ServerConfig(
         trim((string) $form_state->getValue('base_url')),
@@ -245,6 +263,28 @@ final class SettingsForm extends ConfigFormBase {
       ->set('token_endpoint.key_id', trim((string) $form_state->getValue('token_key_id')))
       ->save();
     parent::submitForm($form, $form_state);
+  }
+
+  /**
+   * The form field a problem sentence from the SDK is about.
+   */
+  private static function fieldFor(string $problem): string {
+    $fields = [
+      'base URL' => 'base_url',
+      'data holder' => 'data_holder',
+      'base path' => 'base_path',
+      'API version' => 'api_versions',
+      'data model version' => 'data_model_versions',
+      'en-US' => 'languages',
+      'body limit' => 'max_body_bytes',
+      'embedding depth' => 'embedded_depth',
+    ];
+    foreach ($fields as $needle => $field) {
+      if (str_contains($problem, $needle)) {
+        return $field;
+      }
+    }
+    return 'base_url';
   }
 
   /**

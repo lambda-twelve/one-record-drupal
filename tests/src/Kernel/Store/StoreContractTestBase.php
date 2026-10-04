@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Drupal\Tests\one_record\Kernel\Store;
 
 use Drupal\KernelTests\KernelTestBase;
-use Drupal\Tests\one_record\Support\FixedClock;
 use Drupal\Tests\one_record\Support\Stores;
 use LambdaTwelve\OneRecord\Api\AccessDelegation;
 use LambdaTwelve\OneRecord\Api\ActionRequest;
@@ -33,6 +32,7 @@ use LambdaTwelve\OneRecord\Server\Spi\Grant;
 use LambdaTwelve\OneRecord\Server\Spi\OutboundNotification;
 use LambdaTwelve\OneRecord\Server\Spi\StoreException;
 use LambdaTwelve\OneRecord\Spec\ApiVersion;
+use LambdaTwelve\OneRecord\Testing\FixedClock;
 use LambdaTwelve\OneRecord\Vocabulary\Generated\Cargo;
 use LambdaTwelve\OneRecord\Vocabulary\Generated\CodeLists\MeasurementUnitCode;
 

@@ -10,6 +10,8 @@
 /.dev/composer.lock
 coverage.xml
 coverage.json
+# Finder metadata.
+.DS_Store
 # Local assistant/tooling files: never part of the repository.
 /CLAUDE.md
 /.claude/

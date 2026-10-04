@@ -7,6 +7,53 @@
 
 declare(strict_types=1);
 
+use Drupal\Core\Hook\Attribute\LegacyRequirementsHook;
+use Drupal\one_record\Auth\DatabaseClientCredentials;
+use Drupal\one_record\Config\OneRecordConfig;
+use Drupal\one_record\Hook\RequirementsHooks;
+use Drupal\one_record\Server\ServicesFactory;
+
+/**
+ * Implements hook_install().
+ *
+ * Prepares the hash unknown client ids are verified against, so the first
+ * token request does not pay for making it.
+ */
+function one_record_install(): void {
+  $hash = \Drupal::service('password')->hash(bin2hex(random_bytes(16)));
+  if (is_string($hash) && $hash !== '') {
+    \Drupal::state()->set(DatabaseClientCredentials::DUMMY_HASH_STATE, $hash);
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function one_record_uninstall(): void {
+  \Drupal::state()->delete(DatabaseClientCredentials::DUMMY_HASH_STATE);
+}
+
+/**
+ * Implements hook_requirements().
+ *
+ * The legacy form, for Drupal releases before the OOP requirements hooks;
+ * 11.3 and later skip it (the attribute) and call
+ * Hook\RequirementsHooks::runtimeRequirements() instead.
+ *
+ * @phpstan-return array<string, array<string, mixed>>
+ */
+#[LegacyRequirementsHook]
+function one_record_requirements(string $phase): array {
+  if ($phase !== 'runtime') {
+    return [];
+  }
+  $config = \Drupal::service('one_record.config');
+  \assert($config instanceof OneRecordConfig);
+  $factory = \Drupal::service('one_record.services_factory');
+  \assert($factory instanceof ServicesFactory);
+  return (new RequirementsHooks($config, $factory))->runtimeRequirements();
+}
+
 /**
  * Implements hook_schema().
  *

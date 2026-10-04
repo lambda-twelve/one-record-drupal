@@ -14,7 +14,11 @@ use Psr\SimpleCache\CacheInterface;
  * The SDK caches JWKS documents, partner tokens and server information
  * through PSR-16; this adapter puts them in the one_record cache bin.
  * Expiry is computed from Drupal's time service, the clock the cache
- * backends themselves live by, not from the SDK's clock.
+ * backends themselves live by, not from the SDK's clock. It is also
+ * enforced here, against the current time: Drupal's backends compare an
+ * item's expiry with the request start time, which stands still for the
+ * length of a queue run or a Drush command, and PSR-16 promises an item is
+ * gone once its TTL has passed.
  */
 final class SimpleCache implements CacheInterface {
 
@@ -27,15 +31,21 @@ final class SimpleCache implements CacheInterface {
    * {@inheritdoc}
    */
   public function get(string $key, mixed $default = NULL): mixed {
-    $item = $this->backend->get(self::key($key));
-    return $item === FALSE ? $default : $item->data;
+    $item = $this->live(self::key($key));
+    return $item === NULL ? $default : $item->data;
   }
 
   /**
    * {@inheritdoc}
    */
   public function set(string $key, mixed $value, null|int|\DateInterval $ttl = NULL): bool {
-    $this->backend->set(self::key($key), $value, $this->expire($ttl));
+    $expire = $this->expire($ttl);
+    if ($expire !== CacheBackendInterface::CACHE_PERMANENT && $expire <= $this->time->getCurrentTime()) {
+      // A TTL of zero or less means "not cached", not "cached until now".
+      $this->backend->delete(self::key($key));
+      return TRUE;
+    }
+    $this->backend->set(self::key($key), $value, $expire);
     return TRUE;
   }
 
@@ -95,7 +105,23 @@ final class SimpleCache implements CacheInterface {
    * {@inheritdoc}
    */
   public function has(string $key): bool {
-    return $this->backend->get(self::key($key)) !== FALSE;
+    return $this->live(self::key($key)) !== NULL;
+  }
+
+  /**
+   * The stored item, unless it has expired by the current time.
+   */
+  private function live(string $key): ?\stdClass {
+    $item = $this->backend->get($key);
+    if (!$item instanceof \stdClass) {
+      return NULL;
+    }
+    $expire = (int) $item->expire;
+    if ($expire !== CacheBackendInterface::CACHE_PERMANENT && $expire <= $this->time->getCurrentTime()) {
+      $this->backend->delete($key);
+      return NULL;
+    }
+    return $item;
   }
 
   /**

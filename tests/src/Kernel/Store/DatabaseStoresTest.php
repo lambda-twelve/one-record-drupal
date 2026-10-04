@@ -10,9 +10,9 @@ use Drupal\one_record\Store\DatabaseLogisticsEventStore;
 use Drupal\one_record\Store\DatabaseLogisticsObjectStore;
 use Drupal\one_record\Store\DatabaseNotificationOutbox;
 use Drupal\one_record\Store\DatabaseSubscriptionStore;
-use Drupal\Tests\one_record\Support\FixedClock;
 use Drupal\Tests\one_record\Support\Stores;
 use LambdaTwelve\OneRecord\Server\Spi\OutboundNotification;
+use LambdaTwelve\OneRecord\Testing\FixedClock;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
@@ -49,11 +49,12 @@ final class DatabaseStoresTest extends StoreContractTestBase {
     ]);
     $connection = $this->container->get('database');
     $this->outbox = new DatabaseNotificationOutbox($connection);
+    $requests = new DatabaseActionRequestStore($connection, $clock);
     return new Stores(
       new DatabaseLogisticsObjectStore($connection),
       new DatabaseLogisticsEventStore($connection),
-      new DatabaseActionRequestStore($connection, $clock),
-      new DatabaseSubscriptionStore($connection, $clock),
+      $requests,
+      new DatabaseSubscriptionStore($connection, $requests, $clock),
       new DatabaseAccessDelegationStore($connection, $clock),
       $this->outbox,
     );

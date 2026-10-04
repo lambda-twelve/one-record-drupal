@@ -34,6 +34,29 @@ final class OneRecordConfig {
   }
 
   /**
+   * What the SDK finds wrong with the stored settings, in plain sentences.
+   *
+   * Empty when serverConfig() would succeed. Asked before anything is
+   * constructed, so a status page can say what is missing on an install
+   * that is not configured yet.
+   *
+   * @return list<string>
+   *   The problems.
+   */
+  public function problems(): array {
+    return ServerConfig::problems([
+      'baseUrl' => $this->string('base_url'),
+      'dataHolder' => $this->string('data_holder'),
+      'basePath' => $this->basePath(),
+      'apiVersions' => $this->list('api_versions') ?: NULL,
+      'dataModelVersions' => $this->list('data_model_versions') ?: NULL,
+      'languages' => $this->list('languages') ?: ['en-US'],
+      'maxBodyBytes' => $this->int('max_body_bytes', 1_048_576),
+      'embeddedDepth' => $this->int('embedded_depth', 3),
+    ]);
+  }
+
+  /**
    * The SDK server configuration.
    *
    * @throws \Drupal\one_record\Config\NotConfiguredException
@@ -82,6 +105,11 @@ final class OneRecordConfig {
   /**
    * Agents with full access: the configured ones and the data holder itself.
    *
+   * A stored value that is not an IRI is left out rather than thrown on:
+   * the access policy is built with the container, before any request
+   * could answer 503 for it, and problems() is where a rejected holder is
+   * reported.
+   *
    * @return list<\LambdaTwelve\OneRecord\Rdf\Iri>
    *   The agent IRIs.
    */
@@ -91,7 +119,16 @@ final class OneRecordConfig {
     if ($holder !== '' && !in_array($holder, $agents, TRUE)) {
       $agents[] = $holder;
     }
-    return array_values(array_map(static fn(string $iri): Iri => new Iri($iri), $agents));
+    $iris = [];
+    foreach ($agents as $agent) {
+      try {
+        $iris[] = new Iri($agent);
+      }
+      catch (\InvalidArgumentException) {
+        // Reported by problems(); nothing to grant to.
+      }
+    }
+    return $iris;
   }
 
   /**

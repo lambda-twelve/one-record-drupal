@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Drupal\one_record\Routing;
 
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
+use Drupal\one_record\Authentication\Provider\TokenEndpointProvider;
 use Drupal\one_record\Config\OneRecordConfig;
 use Drupal\one_record\Controller\JwksController;
 use Drupal\one_record\Controller\ServerController;
 use Drupal\one_record\Controller\TokenController;
+use LambdaTwelve\OneRecord\Server\ServerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\Routing\Route;
 
@@ -21,28 +23,26 @@ use Symfony\Component\Routing\Route;
  * authentication or options per endpoint with an ordinary RouteSubscriber,
  * and keeps Drupal's router responsible for what lies outside the API.
  *
- * The pattern list mirrors ServerBuilder, which does not expose its table.
- * Every HTTP method is declared on each route: Drupal would otherwise limit
- * routes to GET and POST (RouteMethodSubscriber), and the SDK must stay the
- * one that answers 405 with the spec's error body and Allow header.
+ * The patterns come from ServerBuilder::routes(), so an endpoint added to
+ * the SDK appears here without a change. Every HTTP method is declared on
+ * each route: Drupal would otherwise limit routes to GET and POST
+ * (RouteMethodSubscriber), and the SDK must stay the one that answers 405
+ * with the spec's error body and Allow header.
  */
 final class Routes implements ContainerInjectionInterface {
 
   /**
-   * Endpoint patterns relative to the base path, keyed by route suffix.
+   * Drupal route suffixes for the SDK's route names.
+   *
+   * Listed where they differ from the derived form (dashes and dots become
+   * underscores), so the names sites may already refer to stay stable.
    */
-  private const ENDPOINTS = [
-    'server_information' => '',
-    'logistics_objects' => '/logistics-objects',
-    'logistics_object' => '/logistics-objects/{id}',
-    'audit_trail' => '/logistics-objects/{id}/audit-trail',
-    'logistics_events' => '/logistics-objects/{id}/logistics-events',
-    'logistics_event' => '/logistics-objects/{id}/logistics-events/{event}',
-    'notifications' => '/notifications',
-    'subscriptions' => '/subscriptions',
-    'access_delegations' => '/access-delegations',
-    'action_request' => '/action-requests/{id}',
-    'bulk_logistics_events' => '/logistics-events',
+  private const NAMES = [
+    'logistics-objects.create' => 'logistics_objects',
+    'logistics-object.audit-trail' => 'audit_trail',
+    'logistics-object.events' => 'logistics_events',
+    'logistics-object.event' => 'logistics_event',
+    'logistics-events.bulk' => 'bulk_logistics_events',
   ];
 
   /**
@@ -70,7 +70,11 @@ final class Routes implements ContainerInjectionInterface {
   public function routes(): array {
     $base = $this->config->basePath();
     $routes = [];
-    foreach (self::ENDPOINTS as $name => $pattern) {
+    // The bulk endpoint is registered whether or not it is enabled: the SDK
+    // answers for it either way, with 404 when the configuration says no.
+    foreach (ServerBuilder::routes(TRUE) as $endpoint) {
+      $name = self::NAMES[$endpoint->name] ?? str_replace(['-', '.'], '_', $endpoint->name);
+      $pattern = $endpoint->pattern === '/' ? '' : $endpoint->pattern;
       $routes['one_record.' . $name] = new Route(
         ($base . $pattern) ?: '/',
         ['_controller' => ServerController::class . '::handle'],
@@ -82,11 +86,13 @@ final class Routes implements ContainerInjectionInterface {
       );
     }
     if ($this->config->tokenEndpointEnabled()) {
+      // Basic credentials on this route belong to the SDK's token endpoint,
+      // not to Drupal's basic_auth; see TokenEndpointProvider.
       $routes['one_record.token'] = new Route(
         $this->config->tokenPath(),
         ['_controller' => TokenController::class . '::handle'],
         ['_access' => 'TRUE'],
-        ['no_cache' => TRUE],
+        ['no_cache' => TRUE, '_auth' => [TokenEndpointProvider::ID]],
         '',
         [],
         self::METHODS,

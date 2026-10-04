@@ -7,14 +7,14 @@ namespace Drupal\Tests\one_record\Kernel;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\one_record\Config\OneRecordConfig;
-use Drupal\Tests\one_record\Support\FixedClock;
-use Drupal\Tests\one_record\Support\HeaderAuthenticator;
 use Drupal\Tests\one_record\Support\MockHttp;
 use GuzzleHttp\Client;
 use LambdaTwelve\OneRecord\Model\Builder\ObjectBuilder;
 use LambdaTwelve\OneRecord\Model\Builder\Values;
 use LambdaTwelve\OneRecord\Model\LogisticsObject;
 use LambdaTwelve\OneRecord\Rdf\Iri;
+use LambdaTwelve\OneRecord\Testing\FixedClock;
+use LambdaTwelve\OneRecord\Testing\HeaderAuthenticator;
 use LambdaTwelve\OneRecord\Vocabulary\Generated\Cargo;
 use LambdaTwelve\OneRecord\Vocabulary\Generated\CodeLists\MeasurementUnitCode;
 use Symfony\Component\HttpFoundation\Request;
@@ -23,8 +23,9 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * A configured ONE Record server inside a kernel test.
  *
- * Only two services are swapped: the authenticator trusts a test header and
- * the clock stands still. Everything else is the module as installed.
+ * Only two services are swapped, both for the SDK's test doubles: the
+ * authenticator trusts a test header and the clock stands still. Everything
+ * else is the module as installed.
  */
 abstract class OneRecordKernelTestBase extends KernelTestBase {
 

@@ -41,7 +41,7 @@ services:
     arguments: ['@database', '@one_record.clock']
   one_record.store.subscriptions:
     class: Drupal\one_record\Store\DatabaseSubscriptionStore
-    arguments: ['@database', '@one_record.clock']
+    arguments: ['@database', '@one_record.store.action_requests', '@one_record.clock']
   one_record.store.delegations:
     class: Drupal\one_record\Store\DatabaseAccessDelegationStore
     arguments: ['@database', '@one_record.clock']
@@ -51,12 +51,18 @@ services:
   one_record.outbox:
     class: Drupal\one_record\Notification\QueuedOutbox
     arguments: ['@one_record.store.outbox', '@database', '@queue']
+  # The SDK runs every mutating request and every DataHolder operation
+  # through this; it is a database transaction, nested as savepoints.
+  one_record.unit_of_work:
+    class: Drupal\one_record\Server\DatabaseUnitOfWork
+    arguments: ['@database']
   LambdaTwelve\OneRecord\Server\Spi\LogisticsObjectStore: '@one_record.store.logistics_objects'
   LambdaTwelve\OneRecord\Server\Spi\LogisticsEventStore: '@one_record.store.logistics_events'
   LambdaTwelve\OneRecord\Server\Spi\ActionRequestStore: '@one_record.store.action_requests'
   LambdaTwelve\OneRecord\Server\Spi\SubscriptionStore: '@one_record.store.subscriptions'
   LambdaTwelve\OneRecord\Server\Spi\AccessDelegationStore: '@one_record.store.delegations'
   LambdaTwelve\OneRecord\Server\Spi\NotificationOutbox: '@one_record.outbox'
+  LambdaTwelve\OneRecord\Server\Spi\UnitOfWork: '@one_record.unit_of_work'
 
   # Authentication and authorisation.
   one_record.signer_factory:
@@ -64,7 +70,7 @@ services:
     arguments: ['@one_record.config', '@settings', '@one_record.clock']
   one_record.client_credentials:
     class: Drupal\one_record\Auth\DatabaseClientCredentials
-    arguments: ['@database', '@password', '@one_record.clock']
+    arguments: ['@database', '@password', '@one_record.clock', '@state']
   one_record.authenticator_factory:
     class: Drupal\one_record\Auth\AuthenticatorFactory
     arguments: ['@one_record.config', '@one_record.clock', '@http_client', '@one_record.psr17_factory', '@one_record.simple_cache', '@logger.channel.one_record', '@one_record.signer_factory']
@@ -75,7 +81,7 @@ services:
     class: Drupal\one_record\Access\AccessPolicyFactory
     arguments: ['@one_record.config', '@one_record.store.delegations', '@one_record.clock']
   one_record.access_policy:
-    class: LambdaTwelve\OneRecord\Server\InMemory\InMemoryAccessPolicy
+    class: LambdaTwelve\OneRecord\Server\GrantAccessPolicy
     factory: ['@one_record.access_policy_factory', 'create']
   LambdaTwelve\OneRecord\Server\Spi\Authenticator: '@one_record.authenticator'
   LambdaTwelve\OneRecord\Server\Spi\AccessPolicy: '@one_record.access_policy'
@@ -99,6 +105,7 @@ services:
       - '@one_record.psr17_factory'
       - '@one_record.psr17_factory'
       - '@logger.channel.one_record'
+      - '@one_record.unit_of_work'
   one_record.services:
     class: LambdaTwelve\OneRecord\Server\Services
     factory: ['@one_record.services_factory', 'create']
@@ -108,7 +115,7 @@ services:
     arguments: ['@one_record.services']
   one_record.handler_factory:
     class: Drupal\one_record\Server\HandlerFactory
-    arguments: ['@one_record.config', '@one_record.services_factory', '@database', '@one_record.psr17_factory', '@one_record.psr17_factory']
+    arguments: ['@one_record.config', '@one_record.services_factory', '@one_record.psr17_factory', '@one_record.psr17_factory']
   one_record.handler:
     class: Psr\Http\Server\RequestHandlerInterface
     factory: ['@one_record.handler_factory', 'create']
@@ -121,6 +128,20 @@ services:
     arguments: ['@router.builder']
     tags:
       - { name: event_subscriber }
+  # Restores the SDK's Content-Language and validators after core's
+  # response pass has overwritten them with Drupal's page defaults.
+  one_record.response_headers_subscriber:
+    class: Drupal\one_record\EventSubscriber\ResponseHeadersSubscriber
+    tags:
+      - { name: event_subscriber }
+  # Sorts above basic_auth (100) and cookie (0) and claims the token path,
+  # so its credentials reach the SDK instead of Drupal's user login and a
+  # stray session cookie does not get the request refused.
+  one_record.authentication.token_endpoint:
+    class: Drupal\one_record\Authentication\Provider\TokenEndpointProvider
+    arguments: ['@one_record.config']
+    tags:
+      - { name: authentication_provider, provider_id: one_record_token_endpoint, priority: 200 }
 
   # Delivering notifications to partners.
   one_record.partner_registry:

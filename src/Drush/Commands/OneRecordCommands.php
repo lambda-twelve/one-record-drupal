@@ -21,6 +21,7 @@ use Drush\Commands\DrushCommands;
 use LambdaTwelve\OneRecord\Api\Permission;
 use LambdaTwelve\OneRecord\Rdf\Iri;
 use LambdaTwelve\OneRecord\Server\DataHolder;
+use LambdaTwelve\OneRecord\Server\ServerBuilder;
 use LambdaTwelve\OneRecord\Server\Spi\Grant;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -77,6 +78,7 @@ final class OneRecordCommands extends DrushCommands {
     'outbox_delivered' => 'Outbox: delivered',
     'outbox_failed' => 'Outbox: failed',
     'clients' => 'Token clients',
+    'wiring' => 'Wiring',
   ])]
   #[CLI\DefaultFields(fields: [
     'configured',
@@ -94,13 +96,15 @@ final class OneRecordCommands extends DrushCommands {
     'outbox_delivered',
     'outbox_failed',
     'clients',
+    'wiring',
   ])]
   public function status(array $options = ['format' => 'table']): PropertyList {
-    $configured = $this->settings->isConfigured();
+    $problems = $this->settings->problems();
+    $configured = $problems === [];
     $outbox = $this->outbox->counts();
     $pending = (int) $this->connection->select('one_record_action_requests')->condition('status', 'REQUEST_PENDING')->countQuery()->execute()?->fetchField();
     return new PropertyList([
-      'configured' => $configured ? 'yes' : 'no (set base_url and data_holder)',
+      'configured' => $configured ? 'yes' : 'no (' . implode(' ', $problems) . ')',
       'endpoint' => $configured ? $this->settings->endpoint() : '',
       'data_holder' => $configured ? $this->settings->serverConfig()->dataHolder->value : '',
       'holder_stored' => $configured ? ($this->objects->exists($this->settings->serverConfig()->dataHolder) ? 'yes' : 'no') : '',
@@ -115,6 +119,7 @@ final class OneRecordCommands extends DrushCommands {
       'outbox_delivered' => $outbox['delivered'],
       'outbox_failed' => $outbox['failed'],
       'clients' => count($this->clients->all()),
+      'wiring' => $configured ? (implode(' ', ServerBuilder::check($this->services->create())) ?: 'ok') : '',
     ]);
   }
 

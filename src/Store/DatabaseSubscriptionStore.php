@@ -5,30 +5,31 @@ declare(strict_types=1);
 namespace Drupal\one_record\Store;
 
 use Drupal\Core\Database\Connection;
-use LambdaTwelve\OneRecord\Api\ActionRequest;
 use LambdaTwelve\OneRecord\Api\ActionRequestType;
-use LambdaTwelve\OneRecord\Api\RequestStatus;
 use LambdaTwelve\OneRecord\Api\Subscription;
 use LambdaTwelve\OneRecord\Api\TopicType;
 use LambdaTwelve\OneRecord\JsonLd\Json;
 use LambdaTwelve\OneRecord\Rdf\Iri;
+use LambdaTwelve\OneRecord\Server\Spi\ActionRequestStore;
 use LambdaTwelve\OneRecord\Server\Spi\SubscriptionStore;
 use Psr\Clock\ClockInterface;
 
 /**
  * Subscriptions in Drupal's database.
  *
- * Who to notify is derived from the accepted subscription requests in the
- * action-request table, through the topic columns that table projects. The
- * subscriptions this host offers to publishers live in their own table.
+ * Who to notify is derived from the accepted subscription requests of the
+ * configured ActionRequestStore, so replacing that store alone keeps
+ * notifications flowing; when it is the module's own, the topic columns its
+ * table projects narrow the candidates in SQL. The subscriptions this host
+ * offers to publishers live in their own table.
  */
 final class DatabaseSubscriptionStore implements SubscriptionStore {
 
-  private const REQUESTS = 'one_record_action_requests';
   private const OFFERS = 'one_record_subscription_offers';
 
   public function __construct(
     private readonly Connection $connection,
+    private readonly ActionRequestStore $requests,
     private readonly ClockInterface $clock,
   ) {}
 
@@ -36,31 +37,15 @@ final class DatabaseSubscriptionStore implements SubscriptionStore {
    * {@inheritdoc}
    */
   public function subscribersOf(Iri $logisticsObject, array $types, \DateTimeImmutable $now): array {
-    $select = $this->connection->select(self::REQUESTS, 'r')
-      ->fields('r', ['document'])
-      ->condition('r.type', ActionRequestType::Subscription->name)
-      ->condition('r.status', RequestStatus::Accepted->shortName())
-      ->orderBy('r.created_at')
-      ->orderBy('r.iri_hash');
-    $select->condition($select->orConditionGroup()
-      ->isNull('r.expires_at')
-      ->condition('r.expires_at', Db::micros($now), '>'));
-    $topics = $select->orConditionGroup()
-      ->condition($select->andConditionGroup()
-        ->condition('r.topic_type', TopicType::Identifier->name)
-        ->condition('r.topic_hash', Db::hash($logisticsObject)));
-    if ($types !== []) {
-      $topics->condition($select->andConditionGroup()
-        ->condition('r.topic_type', TopicType::Type->name)
-        ->condition('r.topic_hash', array_map(Db::hash(...), $types), 'IN'));
-    }
-    $select->condition($topics);
-
+    // The configured request store is the source, whatever it is; when it is
+    // the module's own, its topic projection narrows the candidates in SQL.
+    $candidates = $this->requests instanceof DatabaseActionRequestStore
+      ? $this->requests->acceptedSubscriptionsCovering($logisticsObject, $types, $now)
+      : $this->requests->accepted(ActionRequestType::Subscription);
     $out = [];
-    foreach ($select->execute()?->fetchCol() ?? [] as $document) {
-      $request = ActionRequest::fromJsonLd((string) $document);
+    foreach ($candidates as $request) {
       $subscription = $request->payload;
-      // The SQL narrows the candidates; the SDK's own rules decide.
+      // The SDK's own rules decide.
       if (!$subscription instanceof Subscription || $subscription->isExpiredAt($now) || !$subscription->covers($logisticsObject, $types)) {
         continue;
       }
@@ -117,7 +102,8 @@ final class DatabaseSubscriptionStore implements SubscriptionStore {
       ->condition('topic_hash', Db::hash($subscription->topic))
       ->execute();
     foreach ($rows ?? [] as $row) {
-      // Offers carry no subscriber column; match on the stored document's subscriber.
+      // Offers carry no subscriber column; match on the stored document's
+      // subscriber.
       $offered = Subscription::fromJsonLd((string) $row->document);
       if ($offered->subscriber->equals($subscription->subscriber)) {
         $this->connection->delete(self::OFFERS)->condition('id', (int) $row->id)->execute();

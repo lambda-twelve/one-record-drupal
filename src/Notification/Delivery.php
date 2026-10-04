@@ -13,9 +13,10 @@ use Psr\Log\LoggerInterface;
  * Runs delivery attempts against the outbox.
  *
  * Each attempt claims the row (so concurrent workers do not both send),
- * delivers, and records the outcome. Retries back off from a minute to a
- * day and give up after the configured number of attempts; the row keeps
- * the last error either way.
+ * delivers, and records the outcome under its attempt number, so a worker
+ * that outlived its lease cannot overwrite a later attempt's state. Retries
+ * back off from a minute to a day and give up after the configured number
+ * of attempts; the row keeps the last error either way.
  */
 final class Delivery {
 
@@ -45,22 +46,25 @@ final class Delivery {
       $this->deliverer->deliver($pending);
     }
     catch (DeliveryRejected $e) {
-      $this->outbox->markFailed($id, $now, $e->getMessage());
+      $this->outbox->markFailed($id, $pending->attempts, $now, $e->getMessage());
       $this->logger->warning('Notification @id to @recipient was rejected: @error', $this->context($pending, $e));
       return DeliveryOutcome::GivenUp;
     }
     catch (\Throwable $e) {
       if ($pending->attempts >= $this->config->deliveryMaxAttempts()) {
-        $this->outbox->markFailed($id, $now, $e->getMessage());
+        $this->outbox->markFailed($id, $pending->attempts, $now, $e->getMessage());
         $this->logger->error('Notification @id to @recipient given up after @attempts attempts: @error', $this->context($pending, $e));
         return DeliveryOutcome::GivenUp;
       }
       $delay = self::BACKOFF[min($pending->attempts, count(self::BACKOFF)) - 1];
-      $this->outbox->markRetry($id, $now->modify(sprintf('+%d seconds', $delay)), $e->getMessage());
+      $this->outbox->markRetry($id, $pending->attempts, $now->modify(sprintf('+%d seconds', $delay)), $e->getMessage());
       $this->logger->notice('Notification @id to @recipient failed (attempt @attempts), retrying in @delay s: @error', $this->context($pending, $e) + ['@delay' => $delay]);
       return DeliveryOutcome::Retrying;
     }
-    $this->outbox->markDelivered($id, $now);
+    if (!$this->outbox->markDelivered($id, $pending->attempts, $now)) {
+      $this->logger->warning('Notification @id to @recipient was delivered after its lease ran out; a later attempt owns the row now', $this->context($pending));
+      return DeliveryOutcome::Delivered;
+    }
     $this->logger->info('Notification @id delivered to @recipient', $this->context($pending));
     return DeliveryOutcome::Delivered;
   }

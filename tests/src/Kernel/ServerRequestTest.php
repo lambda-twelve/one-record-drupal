@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\one_record\Kernel;
 
+use Drupal\one_record\Config\OneRecordConfig;
+use Drupal\one_record\Hook\RequirementsHooks;
 use Drupal\one_record\Notification\QueuedOutbox;
 use Drupal\one_record\Store\DatabaseNotificationOutbox;
 use LambdaTwelve\OneRecord\Api\Permission;
@@ -36,7 +38,62 @@ final class ServerRequestTest extends OneRecordKernelTestBase {
     $body = self::json($response);
     self::assertSame('api:ServerInformation', $body['@type']);
     self::assertSame(self::BASE . '/one-record', $body['api:hasServerEndpoint']['@id'] ?? $body['api:hasServerEndpoint']);
-    self::assertStringContainsString('no-cache', (string) $response->headers->get('Cache-Control'), 'Never page-cached');
+    self::assertSame('no-store, private', $response->headers->get('Cache-Control'), 'Never cached, and said explicitly so core leaves the validators alone');
+
+    $hooks = $this->container->get(RequirementsHooks::class);
+    self::assertInstanceOf(RequirementsHooks::class, $hooks, 'Registered as an OOP hook class');
+    $requirements = $hooks->runtimeRequirements();
+    self::assertSame(REQUIREMENT_OK, $requirements['one_record']['severity'], 'The SDK finds nothing amiss in the wiring: the unit of work is bound');
+    self::assertNull($requirements['one_record']['description']);
+    $this->container->get('module_handler')->loadInclude('one_record', 'install');
+    self::assertEquals($requirements, \one_record_requirements('runtime'), 'The legacy hook for older Drupal says the same');
+  }
+
+  /**
+   * Tests that stored settings the SDK rejects answer 503, not an exception.
+   *
+   * The form refuses such values; a configuration import does not
+   * (readiness review B6-001).
+   */
+  public function testRejectedStoredSettingsAnswer503(): void {
+    $this->config(OneRecordConfig::NAME)->set('max_body_bytes', 0)->save();
+    $this->container->get('kernel')->rebuildContainer();
+    $hooks = $this->container->get(RequirementsHooks::class);
+    self::assertInstanceOf(RequirementsHooks::class, $hooks);
+    $requirement = $hooks->runtimeRequirements()['one_record'];
+    self::assertSame(REQUIREMENT_ERROR, $requirement['severity'], 'Set but rejected is an error, not the unconfigured warning');
+    self::assertStringContainsString('positive number of bytes', (string) $requirement['description']);
+
+    $response = $this->request('GET', '/one-record', agent: NULL);
+    self::assertSame(503, $response->getStatusCode(), (string) $response->getContent());
+    self::assertStringContainsString('rejected', (string) $response->getContent());
+    self::assertStringNotContainsString('bytes', (string) $response->getContent(), 'The problem itself stays off the wire');
+  }
+
+  /**
+   * Tests that a malformed stored holder IRI does not break construction.
+   *
+   * The access policy is built with the container and lists the holder as
+   * an internal agent; a value that is not an IRI must not throw there,
+   * before the 503 handler could be chosen (readiness recheck of B6-001).
+   */
+  public function testMalformedStoredHolderAnswers503(): void {
+    $this->config(OneRecordConfig::NAME)->set('data_holder', 'https://holder.example/invalid value')->save();
+    $this->container->get('kernel')->rebuildContainer();
+    $config = $this->container->get('one_record.config');
+    self::assertInstanceOf(OneRecordConfig::class, $config);
+    self::assertSame([], $config->internalAgents(), 'A holder that is not an IRI is nobody to grant to');
+    self::assertStringContainsString('not a valid IRI', implode(' ', $config->problems()));
+
+    $hooks = $this->container->get(RequirementsHooks::class);
+    self::assertInstanceOf(RequirementsHooks::class, $hooks);
+    self::assertSame(REQUIREMENT_ERROR, $hooks->runtimeRequirements()['one_record']['severity']);
+    $this->container->get('module_handler')->loadInclude('one_record', 'install');
+    self::assertSame(REQUIREMENT_ERROR, \one_record_requirements('runtime')['one_record']['severity'], 'The legacy hook builds too');
+
+    $response = $this->request('GET', '/one-record', agent: NULL);
+    self::assertSame(503, $response->getStatusCode(), (string) $response->getContent());
+    self::assertStringContainsString('rejected', (string) $response->getContent());
   }
 
   /**
@@ -82,17 +139,22 @@ final class ServerRequestTest extends OneRecordKernelTestBase {
     self::assertInstanceOf(GrantAccessPolicy::class, $policy);
     $policy->allow(new Iri(self::PARTNER), $iri, [Permission::GetLogisticsObject]);
 
-    $response = $this->request('GET', $path);
+    $response = $this->request('GET', $path, headers: ['Accept-Language' => 'en-US']);
     self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
     self::assertSame('1', $response->headers->get('Revision'));
     self::assertSame(Cargo::Piece, $response->headers->get('Type'));
+    self::assertSame('Fri, 02 Oct 2026 12:00:00 GMT', $response->headers->get('Last-Modified'), 'The SDK\'s validator survives core\'s response pass');
+    self::assertSame('en-US', $response->headers->get('Content-Language'), 'The negotiated language, not Drupal\'s page language');
+    self::assertSame('no-store, private', $response->headers->get('Cache-Control'));
     $body = self::json($response);
     self::assertSame($location, $body['@id']);
     self::assertSame('Books', $body['cargo:goodsDescription']);
 
-    $head = $this->request('HEAD', $path);
+    $head = $this->request('HEAD', $path, headers: ['Accept-Language' => 'en-US']);
     self::assertSame(200, $head->getStatusCode());
     self::assertSame('', (string) $head->getContent());
+    self::assertSame('Fri, 02 Oct 2026 12:00:00 GMT', $head->headers->get('Last-Modified'));
+    self::assertSame('en-US', $head->headers->get('Content-Language'));
 
     $response = $this->request('GET', $path . '?at=' . rawurlencode('2000-01-01T00:00:00Z'));
     self::assertSame(404, $response->getStatusCode(), 'No revision existed then');

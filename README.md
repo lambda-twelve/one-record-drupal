@@ -28,7 +28,7 @@ exposed rough edges in the SDK, they are written down in
 | --- | --- |
 | Drupal | `^10.3 \|\| ^11` |
 | PHP | 8.3 and later |
-| SDK | `lambda-twelve/one-record ^1.0@beta` |
+| SDK | `lambda-twelve/one-record ^1.0.0-beta6` |
 | Drush (optional) | 12.5 and later, for the `one-record:*` commands |
 
 PHP 8.3 is the SDK's floor. Drupal 10.3 is the oldest maintained line that
@@ -42,12 +42,14 @@ supported yet.
 
 ## Installation
 
-The SDK is not on Packagist yet. Until it is, add both repositories:
+The SDK comes from Packagist as a pre-release. This module is not published
+there yet, so add its repository. Name the SDK in the same `require`: a
+pre-release that only a dependency asks for does not pass a project's default
+`minimum-stability`, so the module's own constraint is not enough on its own.
 
 ```sh
-composer config repositories.one-record vcs https://github.com/lambda-twelve/one-record
 composer config repositories.one-record-drupal vcs https://github.com/lambda-twelve/one-record-drupal
-composer require lambda-twelve/one-record-drupal:@dev
+composer require 'lambda-twelve/one-record-drupal:^1.0.0-beta1@beta' 'lambda-twelve/one-record:^1.0.0-beta6@beta'
 drush pm:install one_record
 ```
 
@@ -81,9 +83,11 @@ configuration.
 | `partners` | Who this host sends notifications to: `agent`, optional `endpoint`, `token_url`, `client_id`, optional `scope`, `basic_auth` | `[]` |
 | `delivery.lease_seconds`, `delivery.max_attempts` | Outbox delivery | 300, 10 |
 
-The module validates by building the SDK's `ServerConfig`; an invalid value is
-reported with the SDK's own message. Changing `base_path` or the token endpoint
-rebuilds the router.
+The module validates with the SDK's own `ServerConfig::problems()`; each
+problem is reported on its field in the SDK's words, and the same sentences
+appear on the status report and in `drush one-record:status` while the server
+is not configured. Changing `base_path` or the token endpoint rebuilds the
+router.
 
 ### Secrets
 
@@ -108,10 +112,26 @@ PSR-15 `OneRecordServer` handles it, and the PSR-7 response is converted back.
 Content negotiation, authentication, routing inside the API, 404/405 answers,
 the action-request lifecycle and notification fan-out are all the SDK's.
 
-Mutating requests run inside one database transaction. The SDK converts
-unexpected exceptions into 500 responses, so the transaction is rolled back on
-any 5xx and committed otherwise (a 4xx may legitimately have stored a failed
-action request). Responses are never page-cached.
+The SDK's unit of work is bound to a database transaction
+(`one_record.unit_of_work`). The SDK runs every mutating request, and every
+`DataHolder` operation, through it, so whatever an operation writes stands or
+falls together: an exception anywhere inside, a listener's included, rolls the
+operation back before the SDK turns it into a response, and an acceptance
+beaten by a competing decision answers 409 with no grant or revision left
+behind. Nested operations join the outer unit as savepoints. The SDK also
+stores every decision on an action request before any of its side effects, so
+a lost race writes nothing even where the unit of work is not in play, such as
+a store called directly. The SDK's own check of the wiring
+(`ServerBuilder::check()`) is shown on the status report and by
+`drush one-record:status`; with this module's services it has nothing to
+report.
+
+Responses carry `Cache-Control: no-store, private` and are never page-cached.
+The headers that describe the SDK's representation survive Drupal's response
+pass: core would otherwise overwrite `Content-Language` with the site language
+and, on a response it deems uncacheable, drop `Last-Modified`; the module sets
+the cache policy explicitly and restores the negotiated language and the
+validators after core has run.
 
 Because they are ordinary named routes, a `RouteSubscriber` can alter access
 requirements, authentication options or anything else per endpoint.
@@ -140,25 +160,31 @@ tables hold the JSON-LD the SDK writes plus the columns its queries need.
 IRIs are compared byte for byte, as the SDK does, through SHA-256 hash columns;
 timestamps are UTC microseconds. `saveRevision()` is a compare-and-set
 `UPDATE`, so optimistic concurrency is enforced by the database. The stores
-pass the same contract tests as the SDK's in-memory reference implementations.
+pass the SDK's own store contracts (its `Testing\Contract` traits, run as
+kernel tests) as well as this module's contract tests, which the SDK's
+in-memory reference implementations pass too.
 
 Each store is a service (`one_record.store.*`) aliased under its SDK interface
 name. Replace one to keep that part elsewhere; the rest of the module keeps
-working.
+working. The subscription store derives subscribers from whichever
+action-request store is configured, through the SDK's `accepted()` query, and
+uses its SQL topic projection only when that store is the module's own.
 
 ## Authentication and access
 
 Incoming requests are authenticated by the SDK's `JwtAuthenticator`: RS256
 bearer tokens from the configured issuers, each trusted by pinned public keys or
 a JWKS document (fetched through Drupal's HTTP client and cached in the
-`one_record` cache bin). When the token endpoint is enabled, this server's own
+`one_record` cache bin through a PSR-16 adapter that expires items by the
+current time, so a long queue run or Drush command does not keep reading an
+entry past its TTL). When the token endpoint is enabled, this server's own
 issuer and key are trusted too, so internal systems can use the same tokens.
 
 Authorisation is the SDK's grant policy over the `one_record_grants` table:
 internal agents may do anything, everyone else needs a grant for the object and
 permission in question, and grants from accepted access delegations are honoured
 automatically. Grants are given through accepted access-delegation requests,
-`drush one-record:grant`, or `InMemoryAccessPolicy::allow()` on the
+`drush one-record:grant`, or `GrantAccessPolicy::allow()` on the
 `one_record.access_policy` service from your own code.
 
 To use another token scheme or your own rules, override
@@ -175,8 +201,13 @@ drush one-record:client:create https://1r.example.com/one-record/logistics-objec
 ```
 
 The secret is printed once. The client then obtains tokens with the OAuth 2.0
-client-credentials grant at the configured path; the SDK's `TokenEndpoint`
-answers. Rate limiting is left to your web server or a middleware.
+client-credentials grant at the configured path, sending its credentials as
+form fields or as HTTP Basic; the SDK's `TokenEndpoint` answers. With core's
+`basic_auth` module enabled, Basic credentials would otherwise be a Drupal
+user login; an authentication provider of this module, sorted above
+`basic_auth` and applying to the token path only, keeps them for the SDK
+without logging anyone in or touching flood control. Rate limiting is left to
+your web server or a middleware.
 
 ## Notifications
 
@@ -186,9 +217,16 @@ item on `one_record_outbox`. The queue worker claims the row, sends the
 notification with the SDK client using the partner's client credentials from
 the `partners` configuration, and records the result. Transport errors and 5xx,
 408 and 429 answers are retried with backoff (1 min to 1 day, up to
-`delivery.max_attempts`); any other 4xx or an unknown partner ends delivery.
+`delivery.max_attempts`), as the SDK's `DeliveryVerdict` classifies them; any
+other failure or an unknown partner ends delivery.
 Cron queues whatever is due, so retries do not depend on the queue item
-surviving.
+surviving; a row that is queued twice is attempted once, because the second
+worker finds it leased or finished.
+
+Delivery is at least once. Each claim is numbered, and a worker records its
+outcome under that number, so a worker that outlived its lease cannot overwrite
+what a later attempt recorded; a partner may still see a notification twice and
+is given the SDK's notification id as the `Idempotency-Key` to recognise it.
 
 Received notifications raise the SDK's `NotificationReceived` event and are not
 stored; subscribe to the event to act on them.
@@ -206,8 +244,19 @@ public static function getSubscribedEvents(): array {
 }
 ```
 
-Listeners run synchronously inside the request's transaction; defer I/O to a
-queue.
+Listeners run synchronously inside the unit of work, after the writes they
+report are in place (an accepted delegation's grants, an accepted change's
+revision). Object and event fan-out (`LogisticsObjectUpdated` and the like)
+is queued after the listener; an action request's own status notification
+(Pending on creation, the decision afterwards) is queued *before* the
+listener, so a listener that decides the request on the spot cannot put the
+decision's notification ahead of the state it decided. Either way the queued
+rows belong to the same unit of work: a listener that throws fails the
+operation and rolls it back, request, revision and queued notifications
+included, and the Drupal queue items are only created once the unit commits.
+Treat a listener like a hook that runs inside an entity save: keep it short,
+and hand anything that talks to another system to a queue worker or to a
+post-transaction callback on the database connection.
 
 ## Publishing your own data
 

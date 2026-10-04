@@ -14,6 +14,7 @@ use LambdaTwelve\OneRecord\Server\Spi\LogisticsEventStore;
 use LambdaTwelve\OneRecord\Server\Spi\LogisticsObjectStore;
 use LambdaTwelve\OneRecord\Server\Spi\NotificationOutbox;
 use LambdaTwelve\OneRecord\Server\Spi\SubscriptionStore;
+use LambdaTwelve\OneRecord\Server\Spi\UnitOfWork;
 use Psr\Clock\ClockInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
@@ -24,7 +25,8 @@ use Psr\Log\LoggerInterface;
  * Assembles the SDK's Services object from Drupal's container.
  *
  * Every constructor argument is a container service, so a site swaps any
- * piece (a store, the policy, the authenticator) by overriding that service.
+ * piece (a store, the policy, the authenticator, the unit of work) by
+ * overriding that service.
  */
 final class ServicesFactory {
 
@@ -43,6 +45,7 @@ final class ServicesFactory {
     private readonly ResponseFactoryInterface $responses,
     private readonly StreamFactoryInterface $streams,
     private readonly LoggerInterface $logger,
+    private readonly UnitOfWork $unitOfWork,
   ) {}
 
   /**
@@ -66,6 +69,7 @@ final class ServicesFactory {
       $this->responses,
       $this->streams,
       $this->logger,
+      unitOfWork: $this->unitOfWork,
     );
   }
 

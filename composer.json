@@ -26,7 +26,7 @@
         "php": ">=8.3",
         "ext-json": "*",
         "drupal/core": "^10.3 || ^11",
-        "lambda-twelve/one-record": "^1.0@beta",
+        "lambda-twelve/one-record": "^1.0.0-beta6@beta",
         "psr/clock": "^1.0",
         "psr/event-dispatcher": "^1.0",
         "psr/http-client": "^1.0",

@@ -10,6 +10,7 @@ use LambdaTwelve\OneRecord\Api\ActionRequest;
 use LambdaTwelve\OneRecord\Api\ActionRequestType;
 use LambdaTwelve\OneRecord\Api\RequestStatus;
 use LambdaTwelve\OneRecord\Api\Subscription;
+use LambdaTwelve\OneRecord\Api\TopicType;
 use LambdaTwelve\OneRecord\JsonLd\Json;
 use LambdaTwelve\OneRecord\Rdf\Iri;
 use LambdaTwelve\OneRecord\Server\Spi\ActionRequestStore;
@@ -68,6 +69,13 @@ final class DatabaseActionRequestStore implements ActionRequestStore {
         ->insertFields($fields + ['iri_hash' => Db::hash($request->iri), 'created_at' => $now])
         ->updateFields($fields)
         ->execute();
+      // The SDK saves a request once and fixes its objects then (the
+      // save() envelope, SDK beta6); the pivot rows are still rewritten
+      // rather than merged, so a host that re-saves by hand leaves no
+      // stale association behind.
+      $this->connection->delete(self::OBJECTS)
+        ->condition('action_request_hash', Db::hash($request->iri))
+        ->execute();
       foreach ($request->logisticsObjects() as $object) {
         $this->connection->merge(self::OBJECTS)
           ->keys([
@@ -104,6 +112,51 @@ final class DatabaseActionRequestStore implements ActionRequestStore {
   }
 
   /**
+   * Accepted subscription requests whose projected topic may cover an object.
+   *
+   * The SQL counterpart of accepted(ActionRequestType::Subscription) for the
+   * subscription store built over this table: the topic columns narrow the
+   * candidates, the SDK's own rules then decide. Expiry is pre-filtered on
+   * the projected column; the caller checks it again on the payload.
+   *
+   * @param \LambdaTwelve\OneRecord\Rdf\Iri $logisticsObject
+   *   The object.
+   * @param list<string> $types
+   *   Class IRIs of the object.
+   * @param \DateTimeImmutable $now
+   *   The instant subscriptions must still be valid at.
+   *
+   * @return list<\LambdaTwelve\OneRecord\Api\ActionRequest>
+   *   Candidates, oldest first.
+   */
+  public function acceptedSubscriptionsCovering(Iri $logisticsObject, array $types, \DateTimeImmutable $now): array {
+    $select = $this->connection->select(self::TABLE, 'r')
+      ->fields('r', ['document'])
+      ->condition('r.type', ActionRequestType::Subscription->name)
+      ->condition('r.status', RequestStatus::Accepted->shortName())
+      ->orderBy('r.created_at')
+      ->orderBy('r.iri_hash');
+    $select->condition($select->orConditionGroup()
+      ->isNull('r.expires_at')
+      ->condition('r.expires_at', Db::micros($now), '>'));
+    $topics = $select->orConditionGroup()
+      ->condition($select->andConditionGroup()
+        ->condition('r.topic_type', TopicType::Identifier->name)
+        ->condition('r.topic_hash', Db::hash($logisticsObject)));
+    if ($types !== []) {
+      $topics->condition($select->andConditionGroup()
+        ->condition('r.topic_type', TopicType::Type->name)
+        ->condition('r.topic_hash', array_map(Db::hash(...), $types), 'IN'));
+    }
+    $select->condition($topics);
+    $out = [];
+    foreach ($select->execute()?->fetchCol() ?? [] as $document) {
+      $out[] = ActionRequest::fromJsonLd((string) $document);
+    }
+    return $out;
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function accepted(ActionRequestType $type): array {
@@ -125,7 +178,8 @@ final class DatabaseActionRequestStore implements ActionRequestStore {
    */
   public function transition(ActionRequest $request, RequestStatus $expectedCurrent): void {
     $payload = $request->payload;
-    // Compare-and-set on the stored status: a stale snapshot must not overwrite a newer decision.
+    // Compare-and-set on the stored status: a stale snapshot must not
+    // overwrite a newer decision.
     $updated = $this->connection->update(self::TABLE)
       ->fields([
         'status' => $request->status->shortName(),
