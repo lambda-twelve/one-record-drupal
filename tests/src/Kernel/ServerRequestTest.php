@@ -7,6 +7,7 @@ namespace Drupal\Tests\one_record\Kernel;
 use Drupal\one_record\Config\OneRecordConfig;
 use Drupal\one_record\Hook\RequirementsHooks;
 use Drupal\one_record\Notification\QueuedOutbox;
+use Drupal\one_record\Server\ServicesFactory;
 use Drupal\one_record\Store\DatabaseNotificationOutbox;
 use LambdaTwelve\OneRecord\Api\Permission;
 use LambdaTwelve\OneRecord\Api\Subscription;
@@ -40,9 +41,7 @@ final class ServerRequestTest extends OneRecordKernelTestBase {
     self::assertSame(self::BASE . '/one-record', $body['api:hasServerEndpoint']['@id'] ?? $body['api:hasServerEndpoint']);
     self::assertSame('no-store, private', $response->headers->get('Cache-Control'), 'Never cached, and said explicitly so core leaves the validators alone');
 
-    $hooks = $this->container->get(RequirementsHooks::class);
-    self::assertInstanceOf(RequirementsHooks::class, $hooks, 'Registered as an OOP hook class');
-    $requirements = $hooks->runtimeRequirements();
+    $requirements = $this->requirementsHooks()->runtimeRequirements();
     self::assertSame(REQUIREMENT_OK, $requirements['one_record']['severity'], 'The SDK finds nothing amiss in the wiring: the unit of work is bound');
     self::assertNull($requirements['one_record']['description']);
     $this->container->get('module_handler')->loadInclude('one_record', 'install');
@@ -58,9 +57,7 @@ final class ServerRequestTest extends OneRecordKernelTestBase {
   public function testRejectedStoredSettingsAnswer503(): void {
     $this->config(OneRecordConfig::NAME)->set('max_body_bytes', 0)->save();
     $this->container->get('kernel')->rebuildContainer();
-    $hooks = $this->container->get(RequirementsHooks::class);
-    self::assertInstanceOf(RequirementsHooks::class, $hooks);
-    $requirement = $hooks->runtimeRequirements()['one_record'];
+    $requirement = $this->requirementsHooks()->runtimeRequirements()['one_record'];
     self::assertSame(REQUIREMENT_ERROR, $requirement['severity'], 'Set but rejected is an error, not the unconfigured warning');
     self::assertStringContainsString('positive number of bytes', (string) $requirement['description']);
 
@@ -85,9 +82,7 @@ final class ServerRequestTest extends OneRecordKernelTestBase {
     self::assertSame([], $config->internalAgents(), 'A holder that is not an IRI is nobody to grant to');
     self::assertStringContainsString('not a valid IRI', implode(' ', $config->problems()));
 
-    $hooks = $this->container->get(RequirementsHooks::class);
-    self::assertInstanceOf(RequirementsHooks::class, $hooks);
-    self::assertSame(REQUIREMENT_ERROR, $hooks->runtimeRequirements()['one_record']['severity']);
+    self::assertSame(REQUIREMENT_ERROR, $this->requirementsHooks()->runtimeRequirements()['one_record']['severity']);
     $this->container->get('module_handler')->loadInclude('one_record', 'install');
     self::assertSame(REQUIREMENT_ERROR, \one_record_requirements('runtime')['one_record']['severity'], 'The legacy hook builds too');
 
@@ -207,6 +202,26 @@ final class ServerRequestTest extends OneRecordKernelTestBase {
     $trail = $this->request('GET', $path . '/audit-trail');
     self::assertSame(200, $trail->getStatusCode());
     self::assertSame('2', self::json($trail)['api:hasLatestRevision']['@value']);
+  }
+
+  /**
+   * The requirements hook class.
+   *
+   * Drupal 11.1 and later register it as an OOP hook service; 10.3 has no
+   * OOP hooks and reaches it through the legacy install-file function, so
+   * the test builds it from the same services there.
+   */
+  private function requirementsHooks(): RequirementsHooks {
+    if ($this->container->has(RequirementsHooks::class)) {
+      $hooks = $this->container->get(RequirementsHooks::class);
+      self::assertInstanceOf(RequirementsHooks::class, $hooks, 'Registered as an OOP hook class');
+      return $hooks;
+    }
+    $config = $this->container->get('one_record.config');
+    $factory = $this->container->get('one_record.services_factory');
+    self::assertInstanceOf(OneRecordConfig::class, $config);
+    self::assertInstanceOf(ServicesFactory::class, $factory);
+    return new RequirementsHooks($config, $factory);
   }
 
 }
